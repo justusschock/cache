@@ -33,6 +33,15 @@ CREATE TABLE IF NOT EXISTS go_cache_entries (
 );
 CREATE INDEX IF NOT EXISTS go_cache_entries_expires_at_idx
     ON go_cache_entries (expires_at);
+CREATE TABLE IF NOT EXISTS go_cache_locks (
+    namespace_hash BYTEA NOT NULL,
+    key_hash BYTEA NOT NULL,
+    token TEXT NOT NULL,
+    expires_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (namespace_hash, key_hash)
+);
+CREATE INDEX IF NOT EXISTS go_cache_locks_expires_at_idx
+    ON go_cache_locks (expires_at);
 `
 
 type config[K comparable, V any] struct {

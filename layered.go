@@ -6,7 +6,11 @@ import (
 	"fmt"
 )
 
-var ErrNoLayers = errors.New("cache: at least one layer is required")
+var (
+	ErrNoLayers          = errors.New("cache: at least one layer is required")
+	ErrNoInvalidationBus = errors.New("cache: no invalidation bus configured")
+	ErrInvalidLowerLayer = errors.New("cache: lower layer must have at least one upper layer")
+)
 
 // Event describes a non-fatal layered-cache failure without exposing keys or values.
 type Event struct {
@@ -48,10 +52,23 @@ type LayeredStore[K comparable, V any] struct {
 	layers      []Store[K, V]
 	strictReads bool
 	observer    Observer
+	bus         InvalidationBus[K]
 }
 
 // NewLayered constructs a store from a fastest-to-slowest layer list.
 func NewLayered[K comparable, V any](layers []Store[K, V], options ...LayeredOption) (*LayeredStore[K, V], error) {
+	return newLayered(layers, nil, options...)
+}
+
+// NewLayeredWithInvalidationBus constructs a layered store that publishes invalidations.
+func NewLayeredWithInvalidationBus[K comparable, V any](layers []Store[K, V], bus InvalidationBus[K], options ...LayeredOption) (*LayeredStore[K, V], error) {
+	if bus == nil {
+		return nil, ErrNoInvalidationBus
+	}
+	return newLayered(layers, bus, options...)
+}
+
+func newLayered[K comparable, V any](layers []Store[K, V], bus InvalidationBus[K], options ...LayeredOption) (*LayeredStore[K, V], error) {
 	if len(layers) == 0 {
 		return nil, ErrNoLayers
 	}
@@ -70,6 +87,7 @@ func NewLayered[K comparable, V any](layers []Store[K, V], options ...LayeredOpt
 		layers:      append([]Store[K, V](nil), layers...),
 		strictReads: config.strictReads,
 		observer:    config.observer,
+		bus:         bus,
 	}, nil
 }
 
@@ -119,6 +137,11 @@ func (s *LayeredStore[K, V]) Set(ctx context.Context, namespace string, key K, e
 			joined = errors.Join(joined, fmt.Errorf("cache layer %d set: %w", index, err))
 		}
 	}
+	if s.bus != nil {
+		if err := s.bus.Publish(ctx, InvalidationEvent[K]{Namespace: namespace, Kind: InvalidateKey, Key: key}); err != nil {
+			joined = errors.Join(joined, fmt.Errorf("cache publish invalidation: %w", err))
+		}
+	}
 	return joined
 }
 
@@ -132,7 +155,41 @@ func (s *LayeredStore[K, V]) Invalidate(ctx context.Context, namespace string, k
 			joined = errors.Join(joined, fmt.Errorf("cache layer %d invalidate: %w", index, err))
 		}
 	}
+	if s.bus != nil {
+		if err := s.bus.Publish(ctx, InvalidationEvent[K]{Namespace: namespace, Kind: InvalidateNamespace}); err != nil {
+			joined = errors.Join(joined, fmt.Errorf("cache publish invalidation: %w", err))
+		}
+	}
 	return joined
+}
+
+// ListenInvalidations applies bus events to layers above lowerLayer.
+// The lower layer itself is not touched because it is the event's source of truth.
+func (s *LayeredStore[K, V]) ListenInvalidations(ctx context.Context, namespace string, lowerLayer int) error {
+	if s.bus == nil {
+		return ErrNoInvalidationBus
+	}
+	if lowerLayer <= 0 || lowerLayer >= len(s.layers) {
+		return ErrInvalidLowerLayer
+	}
+	return s.bus.Subscribe(ctx, namespace, func(eventCtx context.Context, event InvalidationEvent[K]) error {
+		var joined error
+		for index := 0; index < lowerLayer; index++ {
+			var err error
+			switch event.Kind {
+			case InvalidateKey:
+				err = s.layers[index].Invalidate(eventCtx, event.Namespace, event.Key)
+			case InvalidateNamespace:
+				err = s.layers[index].InvalidateAll(eventCtx, event.Namespace)
+			default:
+				continue
+			}
+			if err != nil {
+				joined = errors.Join(joined, fmt.Errorf("cache layer %d remote invalidate: %w", index, err))
+			}
+		}
+		return joined
+	})
 }
 
 func (s *LayeredStore[K, V]) InvalidateAll(ctx context.Context, namespace string) error {

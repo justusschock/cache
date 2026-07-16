@@ -6,7 +6,10 @@ import (
 	"time"
 )
 
-var ErrLockNotAcquired = errors.New("cache: lock not acquired")
+var (
+	ErrLockNotAcquired = errors.New("cache: lock not acquired")
+	ErrLeaseLost       = errors.New("cache: lease is no longer owned")
+)
 
 // Locker coordinates cache fills for one namespaced key.
 type Locker[K comparable] interface {

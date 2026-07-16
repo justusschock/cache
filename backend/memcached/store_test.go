@@ -15,3 +15,8 @@ func TestNewRejectsNilClientAndCodecs(t *testing.T) {
 	_, err = memcached.New[string, int](nil, memcached.WithValueCodec[string, int](nil))
 	assert.ErrorIs(t, err, memcached.ErrNilCodec)
 }
+
+func TestNewLockerRejectsNilClient(t *testing.T) {
+	_, err := memcached.NewLocker[string](nil)
+	assert.ErrorIs(t, err, memcached.ErrNilClient)
+}

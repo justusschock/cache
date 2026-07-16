@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	cache "github.com/justusschock/go-cache"
 	rediscache "github.com/justusschock/go-cache/backend/redis"
@@ -31,4 +32,45 @@ func TestStoreIntegrationContract(t *testing.T) {
 		require.NoError(t, err)
 		return store
 	})
+}
+
+func TestLockerIntegration(t *testing.T) {
+	address := os.Getenv("REDIS_ADDR")
+	if address == "" {
+		address = "127.0.0.1:6379"
+	}
+	client := goredis.NewClient(&goredis.Options{Addr: address})
+	t.Cleanup(func() {
+		assert.NoError(t, client.Close())
+	})
+	require.NoError(t, client.Ping(context.Background()).Err())
+	locker, err := rediscache.NewLocker[string](client)
+	require.NoError(t, err)
+
+	lease, err := locker.Lock(context.Background(), t.Name(), "alice", time.Second)
+	require.NoError(t, err)
+	_, err = locker.Lock(context.Background(), t.Name(), "alice", time.Second)
+	assert.ErrorIs(t, err, cache.ErrLockNotAcquired)
+	require.NoError(t, lease.Refresh(context.Background(), time.Second))
+	require.NoError(t, lease.Release(context.Background()))
+	_, err = locker.Lock(context.Background(), t.Name(), "alice", time.Second)
+	assert.NoError(t, err)
+}
+
+func TestInvalidationBusIntegration(t *testing.T) {
+	address := os.Getenv("REDIS_ADDR")
+	if address == "" {
+		address = "127.0.0.1:6379"
+	}
+	client := goredis.NewClient(&goredis.Options{Addr: address})
+	t.Cleanup(func() {
+		assert.NoError(t, client.Close())
+	})
+	require.NoError(t, client.Ping(context.Background()).Err())
+
+	cachetest.RunInvalidationBusContract(t, func(t *testing.T) cache.InvalidationBus[string] {
+		bus, err := rediscache.NewInvalidationBus[string](client)
+		require.NoError(t, err)
+		return bus
+	}, cache.InvalidationEvent[string]{Namespace: t.Name(), Kind: cache.InvalidateKey, Key: "alice", Generation: 3})
 }

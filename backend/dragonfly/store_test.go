@@ -11,3 +11,13 @@ func TestNewRejectsNilClient(t *testing.T) {
 	_, err := dragonfly.New[string, int](nil)
 	assert.ErrorIs(t, err, dragonfly.ErrNilClient)
 }
+
+func TestNewLockerRejectsNilClient(t *testing.T) {
+	_, err := dragonfly.NewLocker[string](nil)
+	assert.ErrorIs(t, err, dragonfly.ErrNilClient)
+}
+
+func TestNewInvalidationBusRejectsNilClient(t *testing.T) {
+	_, err := dragonfly.NewInvalidationBus[string](nil)
+	assert.ErrorIs(t, err, dragonfly.ErrNilClient)
+}
