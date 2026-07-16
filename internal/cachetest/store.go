@@ -2,6 +2,7 @@ package cachetest
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -18,14 +19,16 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 	t.Helper()
 
 	t.Run("hit and miss", func(t *testing.T) {
-		store := factory(t)
+		store := scopedStore(t, factory)
 		entry := cache.Entry[int]{Value: 42, Found: true, ExpiresAt: time.Now().Add(time.Minute)}
 		require.NoError(t, store.Set(context.Background(), "users", "alice", entry))
 
 		got, present, err := store.Get(context.Background(), "users", "alice")
 		require.NoError(t, err)
 		assert.True(t, present)
-		assert.Equal(t, entry, got)
+		assert.Equal(t, entry.Value, got.Value)
+		assert.Equal(t, entry.Found, got.Found)
+		assert.True(t, entry.ExpiresAt.Equal(got.ExpiresAt))
 
 		got, present, err = store.Get(context.Background(), "users", "missing")
 		require.NoError(t, err)
@@ -34,7 +37,7 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 	})
 
 	t.Run("negative entry", func(t *testing.T) {
-		store := factory(t)
+		store := scopedStore(t, factory)
 		entry := cache.Entry[int]{Found: false, ExpiresAt: time.Now().Add(time.Minute)}
 		require.NoError(t, store.Set(context.Background(), "users", "missing", entry))
 
@@ -45,7 +48,7 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 	})
 
 	t.Run("logical expiration", func(t *testing.T) {
-		store := factory(t)
+		store := scopedStore(t, factory)
 		entry := cache.Entry[int]{Value: 42, Found: true, ExpiresAt: time.Now().Add(5 * time.Millisecond)}
 		require.NoError(t, store.Set(context.Background(), "users", "alice", entry))
 		time.Sleep(20 * time.Millisecond)
@@ -57,7 +60,7 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 	})
 
 	t.Run("namespace isolation", func(t *testing.T) {
-		store := factory(t)
+		store := scopedStore(t, factory)
 		entry := cache.Entry[int]{Value: 42, Found: true, ExpiresAt: time.Now().Add(time.Minute)}
 		require.NoError(t, store.Set(context.Background(), "users", "alice", entry))
 
@@ -67,7 +70,7 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 	})
 
 	t.Run("key invalidation", func(t *testing.T) {
-		store := factory(t)
+		store := scopedStore(t, factory)
 		entry := cache.Entry[int]{Value: 42, Found: true, ExpiresAt: time.Now().Add(time.Minute)}
 		require.NoError(t, store.Set(context.Background(), "users", "alice", entry))
 		require.NoError(t, store.Invalidate(context.Background(), "users", "alice"))
@@ -78,7 +81,7 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 	})
 
 	t.Run("namespace invalidation", func(t *testing.T) {
-		store := factory(t)
+		store := scopedStore(t, factory)
 		entry := cache.Entry[int]{Value: 42, Found: true, ExpiresAt: time.Now().Add(time.Minute)}
 		require.NoError(t, store.Set(context.Background(), "users", "alice", entry))
 		require.NoError(t, store.Set(context.Background(), "orders", "alice", entry))
@@ -93,7 +96,7 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 	})
 
 	t.Run("canceled context", func(t *testing.T) {
-		store := factory(t)
+		store := scopedStore(t, factory)
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 
@@ -103,4 +106,33 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 		assert.ErrorIs(t, store.Invalidate(ctx, "users", "alice"), context.Canceled)
 		assert.ErrorIs(t, store.InvalidateAll(ctx, "users"), context.Canceled)
 	})
+}
+
+type namespaceStore struct {
+	cache.Store[string, int]
+	prefix string
+}
+
+func scopedStore(t *testing.T, factory StoreFactory) cache.Store[string, int] {
+	t.Helper()
+	return &namespaceStore{
+		Store:  factory(t),
+		prefix: fmt.Sprintf("%s-%d-", t.Name(), time.Now().UnixNano()),
+	}
+}
+
+func (s *namespaceStore) Get(ctx context.Context, namespace string, key string) (cache.Entry[int], bool, error) {
+	return s.Store.Get(ctx, s.prefix+namespace, key)
+}
+
+func (s *namespaceStore) Set(ctx context.Context, namespace string, key string, entry cache.Entry[int]) error {
+	return s.Store.Set(ctx, s.prefix+namespace, key, entry)
+}
+
+func (s *namespaceStore) Invalidate(ctx context.Context, namespace string, key string) error {
+	return s.Store.Invalidate(ctx, s.prefix+namespace, key)
+}
+
+func (s *namespaceStore) InvalidateAll(ctx context.Context, namespace string) error {
+	return s.Store.InvalidateAll(ctx, s.prefix+namespace)
 }
