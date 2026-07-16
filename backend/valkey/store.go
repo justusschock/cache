@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	cache "github.com/justusschock/go-cache"
@@ -173,15 +174,16 @@ func valkeyGenerationKey(namespace string) string {
 }
 
 func (s *Store[K, V]) generation(ctx context.Context, key string) (uint64, error) {
-	generation, err := s.client.Do(ctx, s.client.B().Get().Key(key).Build()).ToInt64()
+	encoded, err := s.client.Do(ctx, s.client.B().Get().Key(key).Build()).ToString()
 	if valkeyclient.IsValkeyNil(err) {
 		return 0, nil
 	}
 	if err != nil {
 		return 0, fmt.Errorf("cache valkey generation: %w", err)
 	}
-	if generation < 0 {
-		return 0, errors.New("cache valkey: negative generation")
+	generation, err := strconv.ParseUint(encoded, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("cache valkey generation decode: %w", err)
 	}
-	return uint64(generation), nil
+	return generation, nil
 }
