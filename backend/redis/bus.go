@@ -3,6 +3,7 @@ package redis
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	cache "github.com/justusschock/go-cache"
@@ -68,20 +69,22 @@ func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, ha
 	if _, err := pubsub.Receive(ctx); err != nil {
 		return fmt.Errorf("cache redis subscribe invalidation: %w", err)
 	}
+	messages := pubsub.Channel()
 	for {
-		message, err := pubsub.ReceiveMessage(ctx)
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case message, ok := <-messages:
+			if !ok {
+				return errors.New("cache redis: invalidation subscription closed")
 			}
-			return fmt.Errorf("cache redis receive invalidation: %w", err)
-		}
-		event, err := wire.DecodeInvalidation([]byte(message.Payload), b.keyCodec)
-		if err != nil {
-			return err
-		}
-		if err := handler(ctx, event); err != nil {
-			return err
+			event, err := wire.DecodeInvalidation([]byte(message.Payload), b.keyCodec)
+			if err != nil {
+				return err
+			}
+			if err := handler(ctx, event); err != nil {
+				return err
+			}
 		}
 	}
 }
