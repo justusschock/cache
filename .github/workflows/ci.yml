@@ -12,8 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -36,8 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -97,8 +97,8 @@ jobs:
       HAZELCAST_ADDR: 127.0.0.1:5701
       POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/cache_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
@@ -107,4 +107,15 @@ jobs:
           for port in 6379 6380 6381 11211 5701 5432; do
             timeout 120 bash -c "until (echo > /dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; do sleep 1; done"
           done
-      - run: go test -tags=integration ./...
+      - name: Redis integration tests
+        run: go test -tags=integration -timeout=3m ./backend/redis
+      - name: Dragonfly integration tests
+        run: go test -tags=integration -timeout=3m ./backend/dragonfly
+      - name: Valkey integration tests
+        run: go test -tags=integration -timeout=3m ./backend/valkey
+      - name: Memcached integration tests
+        run: go test -tags=integration -timeout=3m ./backend/memcached
+      - name: Hazelcast integration tests
+        run: go test -tags=integration -timeout=3m ./backend/hazelcast
+      - name: PostgreSQL integration tests
+        run: go test -tags=integration -timeout=3m ./backend/postgres
