@@ -57,6 +57,26 @@ func TestLockerIntegration(t *testing.T) {
 	require.NoError(t, lease.Release(context.Background()))
 }
 
+func TestLockerReleaseRejectsNaturalExpiry(t *testing.T) {
+	databaseURL := os.Getenv("POSTGRES_URL")
+	if databaseURL == "" {
+		databaseURL = "postgres://postgres:postgres@127.0.0.1:5432/cache_test?sslmode=disable"
+	}
+	pool, err := pgxpool.New(context.Background(), databaseURL)
+	require.NoError(t, err)
+	t.Cleanup(pool.Close)
+	store, err := postgres.New[string, int](pool)
+	require.NoError(t, err)
+	require.NoError(t, store.Migrate(context.Background()))
+	locker, err := postgres.NewLocker[string](pool)
+	require.NoError(t, err)
+
+	lease, err := locker.Lock(context.Background(), t.Name(), "alice", 10*time.Millisecond)
+	require.NoError(t, err)
+	time.Sleep(50 * time.Millisecond)
+	assert.ErrorIs(t, lease.Release(context.Background()), cache.ErrLeaseLost)
+}
+
 func TestInvalidationBusIntegration(t *testing.T) {
 	databaseURL := os.Getenv("POSTGRES_URL")
 	if databaseURL == "" {

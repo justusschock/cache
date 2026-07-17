@@ -46,3 +46,38 @@ func TestLockerIntegration(t *testing.T) {
 	require.NoError(t, lease.Refresh(context.Background(), time.Second))
 	require.NoError(t, lease.Release(context.Background()))
 }
+
+func TestStorePreservesSubsecondExpiry(t *testing.T) {
+	address := os.Getenv("MEMCACHED_ADDR")
+	if address == "" {
+		address = "127.0.0.1:11211"
+	}
+	store, err := memcached.New[string, string](memcache.New(address))
+	require.NoError(t, err)
+	entry := cache.Entry[string]{Value: "short", Found: true, ExpiresAt: time.Now().Add(100 * time.Millisecond)}
+
+	require.NoError(t, store.Set(context.Background(), t.Name(), "key", entry))
+	got, present, err := store.Get(context.Background(), t.Name(), "key")
+	require.NoError(t, err)
+	assert.True(t, present)
+	assert.Equal(t, entry.Value, got.Value)
+}
+
+func TestStorePreservesExpiryPast2038(t *testing.T) {
+	address := os.Getenv("MEMCACHED_ADDR")
+	if address == "" {
+		address = "127.0.0.1:11211"
+	}
+	store, err := memcached.New[string, string](memcache.New(address))
+	require.NoError(t, err)
+	entry := cache.Entry[string]{
+		Value: "future", Found: true,
+		ExpiresAt: time.Date(2040, time.January, 1, 0, 0, 0, 0, time.UTC),
+	}
+
+	require.NoError(t, store.Set(context.Background(), t.Name(), "key", entry))
+	got, present, err := store.Get(context.Background(), t.Name(), "key")
+	require.NoError(t, err)
+	assert.True(t, present)
+	assert.Equal(t, entry.Value, got.Value)
+}

@@ -14,6 +14,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type nilCodec[T any] struct{}
+
+func (*nilCodec[T]) Encode(T) ([]byte, error) { return nil, nil }
+func (*nilCodec[T]) Decode([]byte) (T, error) {
+	var zero T
+	return zero, nil
+}
+
 func TestStoreContract(t *testing.T) {
 	cachetest.RunStoreContract(t, func(t *testing.T) cache.Store[string, int] {
 		store, err := disk.Open[string, int](filepath.Join(t.TempDir(), "cache.db"))
@@ -65,5 +73,12 @@ func TestOpenRejectsEmptyPathAndNilCodecs(t *testing.T) {
 	_, err = disk.Open("cache.db", disk.WithKeyCodec[string, int](nil))
 	assert.ErrorIs(t, err, disk.ErrNilCodec)
 	_, err = disk.Open("cache.db", disk.WithValueCodec[string, int](nil))
+	assert.ErrorIs(t, err, disk.ErrNilCodec)
+
+	var keyCodec *nilCodec[string]
+	_, err = disk.Open(filepath.Join(t.TempDir(), "typed-nil.db"), disk.WithKeyCodec[string, int](keyCodec))
+	assert.ErrorIs(t, err, disk.ErrNilCodec)
+	var valueCodec *nilCodec[int]
+	_, err = disk.Open(filepath.Join(t.TempDir(), "typed-nil.db"), disk.WithValueCodec[string, int](valueCodec))
 	assert.ErrorIs(t, err, disk.ErrNilCodec)
 }
