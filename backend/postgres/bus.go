@@ -72,6 +72,9 @@ func (b *InvalidationBus[K]) Publish(ctx context.Context, event cache.Invalidati
 }
 
 func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, handler cache.InvalidationHandler[K]) error {
+	if handler == nil {
+		return cache.ErrNilInvalidationHandler
+	}
 	connection, err := b.pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("cache postgres acquire invalidation listener: %w", err)

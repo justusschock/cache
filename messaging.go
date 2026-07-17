@@ -12,7 +12,6 @@ var (
 	ErrNilMessagingPublisher  = errors.New("cache: messaging publisher must not be nil")
 	ErrNilMessagingSubscriber = errors.New("cache: messaging subscriber must not be nil")
 	ErrNilSubscriptionFactory = errors.New("cache: subscription factory must not be nil")
-	ErrNilInvalidationHandler = errors.New("cache: invalidation handler must not be nil")
 )
 
 // SubscriptionFactory maps a namespace to the deterministic subscription used

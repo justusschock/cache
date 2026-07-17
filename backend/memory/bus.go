@@ -46,6 +46,9 @@ func (b *InvalidationBus[K]) Publish(ctx context.Context, event cache.Invalidati
 
 // Subscribe registers a handler until the context is canceled.
 func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, handler cache.InvalidationHandler[K]) error {
+	if handler == nil {
+		return cache.ErrNilInvalidationHandler
+	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}

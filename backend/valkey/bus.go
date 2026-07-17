@@ -65,6 +65,9 @@ func (b *InvalidationBus[K]) Publish(ctx context.Context, event cache.Invalidati
 }
 
 func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, handler cache.InvalidationHandler[K]) error {
+	if handler == nil {
+		return cache.ErrNilInvalidationHandler
+	}
 	subscriptionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	var mu sync.Mutex

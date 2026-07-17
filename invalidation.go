@@ -1,6 +1,11 @@
 package cache
 
-import "context"
+import (
+	"context"
+	"errors"
+)
+
+var ErrNilInvalidationHandler = errors.New("cache: invalidation handler must not be nil")
 
 // InvalidationKind identifies the scope of an invalidation event.
 type InvalidationKind uint8

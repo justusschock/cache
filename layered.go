@@ -43,6 +43,10 @@ func WithStrictLayerReads() LayeredOption {
 // WithLayerObserver reports errors skipped by fail-open reads and promotions.
 func WithLayerObserver(observer Observer) LayeredOption {
 	return func(config *layeredConfig) {
+		if isNil(observer) {
+			config.observer = nil
+			return
+		}
 		config.observer = observer
 	}
 }

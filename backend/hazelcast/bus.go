@@ -69,6 +69,9 @@ func (b *InvalidationBus[K]) Publish(ctx context.Context, event cache.Invalidati
 }
 
 func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, handler cache.InvalidationHandler[K]) error {
+	if handler == nil {
+		return cache.ErrNilInvalidationHandler
+	}
 	callbackErrors := make(chan error, 1)
 	var once sync.Once
 	report := func(err error) {
