@@ -220,3 +220,11 @@ func expiration(expiresAt time.Time) int32 {
 	}
 	return int32(absolute)
 }
+
+func leaseExpiration(expiresAt time.Time) (int32, error) {
+	expiration := expiration(expiresAt)
+	if expiration == 0 {
+		return 0, fmt.Errorf("%w: memcached lease expiry exceeds signed 32-bit Unix time", cache.ErrInvalidTTL)
+	}
+	return expiration, nil
+}

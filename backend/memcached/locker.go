@@ -62,6 +62,10 @@ func (l *Locker[K]) Lock(ctx context.Context, namespace string, key K, ttl time.
 	if ttl <= 0 {
 		return nil, cache.ErrInvalidTTL
 	}
+	expiration, err := leaseExpiration(time.Now().Add(ttl))
+	if err != nil {
+		return nil, err
+	}
 	physicalKey, err := l.key(namespace, key)
 	if err != nil {
 		return nil, err
@@ -71,7 +75,7 @@ func (l *Locker[K]) Lock(ctx context.Context, namespace string, key K, ttl time.
 		return nil, fmt.Errorf("cache memcached lock token: %w", err)
 	}
 	token := hex.EncodeToString(tokenBytes)
-	err = l.client.Add(&memcache.Item{Key: physicalKey, Value: []byte(token), Expiration: expiration(time.Now().Add(ttl))})
+	err = l.client.Add(&memcache.Item{Key: physicalKey, Value: []byte(token), Expiration: expiration})
 	if errors.Is(err, memcache.ErrNotStored) {
 		return nil, cache.ErrLockNotAcquired
 	}
@@ -108,6 +112,10 @@ func (l *memcachedLease) Refresh(ctx context.Context, ttl time.Duration) error {
 	if ttl <= 0 {
 		return cache.ErrInvalidTTL
 	}
+	expiration, err := leaseExpiration(time.Now().Add(ttl))
+	if err != nil {
+		return err
+	}
 	item, err := l.client.Get(l.key)
 	if errors.Is(err, memcache.ErrCacheMiss) {
 		return cache.ErrLeaseLost
@@ -118,7 +126,7 @@ func (l *memcachedLease) Refresh(ctx context.Context, ttl time.Duration) error {
 	if string(item.Value) != l.token {
 		return cache.ErrLeaseLost
 	}
-	item.Expiration = expiration(time.Now().Add(ttl))
+	item.Expiration = expiration
 	if err := l.client.CompareAndSwap(item); err != nil {
 		if errors.Is(err, memcache.ErrCASConflict) || errors.Is(err, memcache.ErrNotStored) || errors.Is(err, memcache.ErrCacheMiss) {
 			return cache.ErrLeaseLost
@@ -149,9 +157,6 @@ func (l *memcachedLease) Release(ctx context.Context) error {
 			return cache.ErrLeaseLost
 		}
 		return fmt.Errorf("cache memcached release lease: %w", err)
-	}
-	if err := l.client.Delete(l.key); err != nil && !errors.Is(err, memcache.ErrCacheMiss) {
-		return fmt.Errorf("cache memcached delete lease: %w", err)
 	}
 	return ctx.Err()
 }
