@@ -239,13 +239,27 @@ func (s *Store[K, V]) InvalidateAll(ctx context.Context, namespace string) (retu
 	return nil
 }
 
-// DeleteExpired removes physically retained entries after logical TTL expiry.
+// DeleteExpired removes physically retained entries and locks after logical TTL expiry.
 func (s *Store[K, V]) DeleteExpired(ctx context.Context) (int64, error) {
-	result, err := s.pool.Exec(ctx, "DELETE FROM go_cache_entries WHERE expires_at <= NOW()")
+	var removed int64
+	err := s.pool.QueryRow(ctx, `
+		WITH deleted_entries AS (
+			DELETE FROM go_cache_entries
+			WHERE expires_at <= clock_timestamp()
+			RETURNING 1
+		), deleted_locks AS (
+			DELETE FROM go_cache_locks
+			WHERE expires_at <= clock_timestamp()
+			RETURNING 1
+		)
+		SELECT
+			(SELECT COUNT(*) FROM deleted_entries) +
+			(SELECT COUNT(*) FROM deleted_locks)
+	`).Scan(&removed)
 	if err != nil {
 		return 0, fmt.Errorf("cache postgres delete expired: %w", err)
 	}
-	return result.RowsAffected(), nil
+	return removed, nil
 }
 
 func advisoryKey(namespaceHash [32]byte) int64 {
