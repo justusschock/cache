@@ -16,7 +16,7 @@ type InvalidationOption[K comparable] func(*invalidationConfig[K]) error
 // WithInvalidationKeyCodec overrides automatic invalidation-key serialization.
 func WithInvalidationKeyCodec[K comparable](codec cache.Codec[K]) InvalidationOption[K] {
 	return func(config *invalidationConfig[K]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.keyCodec = codec

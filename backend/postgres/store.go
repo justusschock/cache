@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -55,7 +54,7 @@ type Option[K comparable, V any] func(*config[K, V]) error
 // WithKeyCodec overrides automatic key serialization.
 func WithKeyCodec[K comparable, V any](codec cache.Codec[K]) Option[K, V] {
 	return func(config *config[K, V]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.keyCodec = codec
@@ -66,7 +65,7 @@ func WithKeyCodec[K comparable, V any](codec cache.Codec[K]) Option[K, V] {
 // WithValueCodec overrides automatic value serialization.
 func WithValueCodec[K comparable, V any](codec cache.Codec[V]) Option[K, V] {
 	return func(config *config[K, V]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.valueCodec = codec
@@ -133,7 +132,7 @@ func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.E
 	if err != nil {
 		return zero, false, fmt.Errorf("cache postgres decode: %w", err)
 	}
-	if generation < 0 || recordGeneration != uint64(generation) || !entry.ExpiresAt.After(time.Now()) {
+	if generation < 0 || recordGeneration != uint64(generation) {
 		return zero, false, nil
 	}
 	return entry, true, nil
@@ -142,9 +141,6 @@ func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.E
 func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry cache.Entry[V]) (returnErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
-	}
-	if !entry.ExpiresAt.After(time.Now()) {
-		return s.Invalidate(ctx, namespace, key)
 	}
 	namespaceHash := wire.Namespace(namespace)
 	keyHash, err := s.encoder.Key(key)
@@ -160,6 +156,21 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 	}()
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", advisoryKey(namespaceHash)); err != nil {
 		return fmt.Errorf("cache postgres set lock: %w", err)
+	}
+	var fresh bool
+	if err := tx.QueryRow(ctx, "SELECT $1::timestamptz > clock_timestamp()", entry.ExpiresAt).Scan(&fresh); err != nil {
+		return fmt.Errorf("cache postgres check expiry: %w", err)
+	}
+	if !fresh {
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM go_cache_entries WHERE namespace_hash = $1 AND key_hash = $2
+		`, namespaceHash[:], keyHash[:]); err != nil {
+			return fmt.Errorf("cache postgres delete expired set: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("cache postgres commit expired set: %w", err)
+		}
+		return nil
 	}
 	generation, err := generationInTx(ctx, tx, namespaceHash[:])
 	if err != nil {

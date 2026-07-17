@@ -24,7 +24,7 @@ type LockerOption[K comparable] func(*lockerConfig[K]) error
 // WithLockerKeyCodec overrides automatic lock key serialization.
 func WithLockerKeyCodec[K comparable](codec cache.Codec[K]) LockerOption[K] {
 	return func(config *lockerConfig[K]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.keyCodec = codec
@@ -78,10 +78,11 @@ func (l *Locker[K]) Lock(ctx context.Context, namespace string, key K, ttl time.
 	if err != nil {
 		return nil, fmt.Errorf("cache memcached lock: %w", err)
 	}
+	lease := &memcachedLease{client: l.client, key: physicalKey, token: token}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, errors.Join(err, lease.Release(context.Background()))
 	}
-	return &memcachedLease{client: l.client, key: physicalKey, token: token}, nil
+	return lease, nil
 }
 
 func (l *Locker[K]) key(namespace string, key K) (string, error) {

@@ -30,7 +30,7 @@ type Option[K comparable, V any] func(*config[K, V]) error
 // WithKeyCodec overrides automatic key serialization.
 func WithKeyCodec[K comparable, V any](codec cache.Codec[K]) Option[K, V] {
 	return func(config *config[K, V]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.keyCodec = codec
@@ -41,7 +41,7 @@ func WithKeyCodec[K comparable, V any](codec cache.Codec[K]) Option[K, V] {
 // WithValueCodec overrides automatic value serialization.
 func WithValueCodec[K comparable, V any](codec cache.Codec[V]) Option[K, V] {
 	return func(config *config[K, V]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.valueCodec = codec
@@ -66,7 +66,7 @@ func New[K comparable, V any](client valkeyclient.Client, options ...Option[K, V
 			return nil, err
 		}
 	}
-	if client == nil {
+	if isNil(client) {
 		return nil, ErrNilClient
 	}
 	return &Store[K, V]{client: client, encoder: wire.New(config.keyCodec, config.valueCodec)}, nil

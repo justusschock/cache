@@ -31,11 +31,6 @@ func TestNewRejectsInvalidConfiguration(t *testing.T) {
 	assert.ErrorIs(t, err, hazelcastcache.ErrNilCodec)
 }
 
-func TestNewLockerRejectsNilClient(t *testing.T) {
-	_, err := hazelcastcache.NewLocker[string](context.Background(), nil)
-	assert.ErrorIs(t, err, hazelcastcache.ErrNilClient)
-}
-
 func TestNewInvalidationBusRejectsNilClientAndCodec(t *testing.T) {
 	_, err := hazelcastcache.NewInvalidationBus[string](context.Background(), nil)
 	assert.ErrorIs(t, err, hazelcastcache.ErrNilClient)

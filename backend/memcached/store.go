@@ -31,7 +31,7 @@ type Option[K comparable, V any] func(*config[K, V]) error
 // WithKeyCodec overrides automatic key serialization.
 func WithKeyCodec[K comparable, V any](codec cache.Codec[K]) Option[K, V] {
 	return func(config *config[K, V]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.keyCodec = codec
@@ -42,7 +42,7 @@ func WithKeyCodec[K comparable, V any](codec cache.Codec[K]) Option[K, V] {
 // WithValueCodec overrides automatic value serialization.
 func WithValueCodec[K comparable, V any](codec cache.Codec[V]) Option[K, V] {
 	return func(config *config[K, V]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.valueCodec = codec
@@ -199,12 +199,24 @@ func (s *Store[K, V]) generation(key string) (uint64, error) {
 }
 
 func expiration(expiresAt time.Time) int32 {
-	seconds := expiresAt.Unix()
-	if seconds > math.MaxInt32 {
-		return math.MaxInt32
+	ttl := time.Until(expiresAt)
+	seconds := ttl / time.Second
+	if ttl%time.Second != 0 {
+		seconds++
 	}
-	if seconds < 1 {
+	if seconds <= 0 {
 		return 1
 	}
-	return int32(seconds)
+	const maxRelativeExpiration = 30 * 24 * time.Hour
+	if ttl <= maxRelativeExpiration {
+		return int32(seconds)
+	}
+	absolute := expiresAt.Unix()
+	if absolute > math.MaxInt32 {
+		return 0
+	}
+	if absolute < 1 {
+		return 1
+	}
+	return int32(absolute)
 }

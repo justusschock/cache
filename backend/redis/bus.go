@@ -21,7 +21,7 @@ type InvalidationOption[K comparable] func(*invalidationConfig[K]) error
 // WithInvalidationKeyCodec overrides automatic invalidation-key serialization.
 func WithInvalidationKeyCodec[K comparable](codec cache.Codec[K]) InvalidationOption[K] {
 	return func(config *invalidationConfig[K]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.keyCodec = codec
@@ -46,7 +46,7 @@ func NewInvalidationBus[K comparable](client goredis.UniversalClient, options ..
 			return nil, err
 		}
 	}
-	if client == nil {
+	if isNil(client) {
 		return nil, ErrNilClient
 	}
 	return &InvalidationBus[K]{client: client, keyCodec: config.keyCodec}, nil
@@ -81,6 +81,9 @@ func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, ha
 			event, err := wire.DecodeInvalidation([]byte(message.Payload), b.keyCodec)
 			if err != nil {
 				return err
+			}
+			if event.Namespace != namespace {
+				continue
 			}
 			if err := handler(ctx, event); err != nil {
 				return err

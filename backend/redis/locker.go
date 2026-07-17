@@ -38,7 +38,7 @@ type LockerOption[K comparable] func(*lockerConfig[K]) error
 // WithLockerKeyCodec overrides automatic lock key serialization.
 func WithLockerKeyCodec[K comparable](codec cache.Codec[K]) LockerOption[K] {
 	return func(config *lockerConfig[K]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.keyCodec = codec
@@ -63,7 +63,7 @@ func NewLocker[K comparable](client goredis.UniversalClient, options ...LockerOp
 			return nil, err
 		}
 	}
-	if client == nil {
+	if isNil(client) {
 		return nil, ErrNilClient
 	}
 	return &Locker[K]{client: client, keyCodec: config.keyCodec}, nil

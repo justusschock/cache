@@ -21,7 +21,7 @@ type InvalidationOption[K comparable] func(*invalidationConfig[K]) error
 // WithInvalidationKeyCodec overrides automatic invalidation-key serialization.
 func WithInvalidationKeyCodec[K comparable](codec cache.Codec[K]) InvalidationOption[K] {
 	return func(config *invalidationConfig[K]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.keyCodec = codec
@@ -46,7 +46,7 @@ func NewInvalidationBus[K comparable](client valkeyclient.Client, options ...Inv
 			return nil, err
 		}
 	}
-	if client == nil {
+	if isNil(client) {
 		return nil, ErrNilClient
 	}
 	return &InvalidationBus[K]{client: client, keyCodec: config.keyCodec}, nil
@@ -87,6 +87,9 @@ func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, ha
 		event, decodeErr := wire.DecodeInvalidation([]byte(message.Message), b.keyCodec)
 		if decodeErr != nil {
 			setHandlerError(decodeErr)
+			return
+		}
+		if event.Namespace != namespace {
 			return
 		}
 		if handleErr := handler(subscriptionCtx, event); handleErr != nil {

@@ -16,7 +16,7 @@ type LockerOption[K comparable] func(*lockerConfig[K]) error
 // WithLockerKeyCodec overrides automatic lock key serialization.
 func WithLockerKeyCodec[K comparable](codec cache.Codec[K]) LockerOption[K] {
 	return func(config *lockerConfig[K]) error {
-		if codec == nil {
+		if isNil(codec) {
 			return ErrNilCodec
 		}
 		config.keyCodec = codec
