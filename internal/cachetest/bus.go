@@ -21,7 +21,7 @@ func RunInvalidationBusContract[K comparable](
 	publisher := newBus(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	listenerResult := make(chan error, 1)
-	received := make(chan cache.InvalidationEvent[K], 1)
+	received := make(chan cache.InvalidationEvent[K], 2)
 	Go(listenerResult, func() error {
 		return subscriber.Subscribe(ctx, event.Namespace, func(_ context.Context, delivered cache.InvalidationEvent[K]) error {
 			select {
@@ -38,9 +38,17 @@ func RunInvalidationBusContract[K comparable](
 		select {
 		case delivered := <-received:
 			assert.Equal(t, event, delivered)
-			cancel()
-			assert.ErrorIs(t, <-listenerResult, context.Canceled)
-			return
+			require.NoError(t, publisher.Publish(context.Background(), event))
+			select {
+			case duplicate := <-received:
+				assert.Equal(t, event, duplicate)
+				cancel()
+				assert.ErrorIs(t, <-listenerResult, context.Canceled)
+				return
+			case <-time.After(time.Second):
+				cancel()
+				require.Fail(t, "duplicate invalidation event was not delivered")
+			}
 		case <-time.After(20 * time.Millisecond):
 			if time.Now().After(deadline) {
 				cancel()

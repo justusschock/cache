@@ -59,6 +59,19 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 		assert.Equal(t, cache.Entry[int]{}, got)
 	})
 
+	t.Run("expired overwrite removes stale value", func(t *testing.T) {
+		store := scopedStore(t, factory)
+		fresh := cache.Entry[int]{Value: 42, Found: true, ExpiresAt: time.Now().Add(time.Minute)}
+		expired := cache.Entry[int]{Value: 99, Found: true, ExpiresAt: time.Now().Add(-time.Second)}
+		require.NoError(t, store.Set(context.Background(), "users", "alice", fresh))
+		require.NoError(t, store.Set(context.Background(), "users", "alice", expired))
+
+		got, present, err := store.Get(context.Background(), "users", "alice")
+		require.NoError(t, err)
+		assert.False(t, present)
+		assert.Equal(t, cache.Entry[int]{}, got)
+	})
+
 	t.Run("namespace isolation", func(t *testing.T) {
 		store := scopedStore(t, factory)
 		entry := cache.Entry[int]{Value: 42, Found: true, ExpiresAt: time.Now().Add(time.Minute)}
@@ -78,6 +91,12 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 		_, present, err := store.Get(context.Background(), "users", "alice")
 		require.NoError(t, err)
 		assert.False(t, present)
+	})
+
+	t.Run("invalidate missing is idempotent", func(t *testing.T) {
+		store := scopedStore(t, factory)
+		require.NoError(t, store.Invalidate(context.Background(), "users", "missing"))
+		require.NoError(t, store.Invalidate(context.Background(), "users", "missing"))
 	})
 
 	t.Run("namespace invalidation", func(t *testing.T) {

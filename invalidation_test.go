@@ -93,3 +93,14 @@ func TestLayeredInvalidationBusPropagatesNamespaceInvalidation(t *testing.T) {
 	cancel()
 	assert.ErrorIs(t, <-listenerResult, context.Canceled)
 }
+
+func TestMemoryInvalidationBusContract(t *testing.T) {
+	bus := memory.NewInvalidationBus[string]()
+	cachetest.RunInvalidationBusContract(t, func(*testing.T) cache.InvalidationBus[string] {
+		return bus
+	}, cache.InvalidationEvent[string]{
+		Namespace: "users",
+		Kind:      cache.InvalidateKey,
+		Key:       "alice",
+	})
+}
