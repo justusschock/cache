@@ -19,7 +19,9 @@ type Codec[T any] interface {
 type automaticCodec[T any] struct{}
 
 // DefaultCodec returns the automatic codec for T. Strings, byte slices, and
-// scalar values use direct encodings; composite values use JSON.
+// scalar values use direct encodings; composite values use JSON. Encoded key
+// identity is defined by the resulting bytes, so pointer keys encode their
+// pointed-to value rather than their in-process pointer identity.
 func DefaultCodec[T any]() Codec[T] {
 	return automaticCodec[T]{}
 }

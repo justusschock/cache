@@ -15,6 +15,8 @@ var (
 	ErrNilInvalidationHandler = errors.New("cache: invalidation handler must not be nil")
 )
 
+// SubscriptionFactory maps a namespace to the deterministic subscription used
+// for both publishing and subscribing. In particular, Subject must be stable.
 type SubscriptionFactory func(namespace string) messaging.Subscription
 
 type MessagingInvalidationBus[K comparable] struct {

@@ -134,7 +134,7 @@ loaded, err := cache.NewPullThrough(
 )
 ```
 
-Observable lease loss or renewal failure cancels the loader, waits for it to return, releases the lease with a non-canceled context, and returns `ErrFillLeaseLost` without starting a cache write. Loaders used with leases must honor context cancellation. These leases reduce duplicate fills; they are not a substitute for fenced writes in a correctness-critical data store.
+Observable lease loss or renewal failure cancels the loader, waits for it to return, and releases the lease with a non-canceled context. Loss detected before storage prevents the cache write from starting. If ownership changes while `Cache.Set` is already running, the write receives a canceled context and `Get` returns `ErrFillLeaseLost`, but the `Cache` interface cannot fence an implementation that has already committed or ignores cancellation. Loaders and cache implementations used with leases must honor context cancellation. These leases reduce duplicate fills; they are not a substitute for fenced writes in a correctness-critical data store.
 
 ## Distributed invalidation
 
@@ -177,7 +177,7 @@ go func() {
 }()
 ```
 
-`Subscribe` follows the messaging lifetime contract and normally blocks until its context ends. Successfully handled and namespace-mismatched deliveries are acknowledged; handler failures are negatively acknowledged for at-least-once retry.
+`SubscriptionFactory` is also the source of the publish subject, so it must return a stable subject for each namespace. `Subscribe` follows the messaging lifetime contract and normally blocks until its context ends. Successfully handled and namespace-mismatched deliveries are acknowledged; handler failures are negatively acknowledged for at-least-once retry.
 
 ## Store and adapter contracts
 
@@ -186,6 +186,8 @@ go func() {
 `StandardCache` owns namespace and TTL policy. It exposes ordinary value operations through `Cache` and entry-aware operations through `EntryCache`. `SetEntry` rejects entries that are already expired.
 
 The automatic `Codec[T]` directly encodes strings, byte slices, booleans, numeric scalars, and JSON-compatible composites. Interface values require a custom codec because their concrete decode type is ambiguous.
+
+Key identity depends on the backend. The memory backend uses Go `==` for `K`; serialized backends use the bytes produced by the key codec. In particular, two pointers to equal values are distinct memory keys but produce the same default JSON key. Prefer scalar or value keys when caches may be layered or swapped, or supply a custom codec whose byte identity matches the application's key semantics.
 
 ## Optional backend modules
 
@@ -199,7 +201,7 @@ Install only the backend needed by an application. Every nested module requires 
 | `backend/valkey` | yes | yes | yes |
 | `backend/dragonfly` | yes | yes | yes |
 | `backend/memcached` | yes | yes | no |
-| `backend/hazelcast` | yes | yes | yes |
+| `backend/hazelcast` | yes | no | yes |
 
 For example:
 
@@ -207,7 +209,9 @@ For example:
 go get github.com/justusschock/go-cache/backend/redis@v0.1.0
 ```
 
-Remote clients and connection pools remain caller-owned. The bbolt store owns its file handle and must be closed. PostgreSQL requires an explicit idempotent `Migrate` call. Integration tests are opt-in with the `integration` build tag.
+Remote clients and connection pools remain caller-owned; stores, lockers, and invalidation buses never close them. The bbolt store owns its file handle and must be closed. PostgreSQL requires an explicit idempotent `Migrate` call and uses the server clock for entry and lease expiration decisions. Persistent entry envelopes store expiration as signed seconds plus nanoseconds and continue to decode version-one nanosecond timestamps.
+
+Memcached rounds positive TTLs up to the nearest second and uses relative expiration for durations up to 30 days. Expirations after its signed 32-bit Unix range use server expiration `0`; the entry envelope still enforces logical expiry, while physical removal is left to Memcached eviction. Hazelcast intentionally has no `Locker`: its map API cannot atomically verify a lease token and extend that same value's TTL, so a two-command refresh could extend a successor's lease.
 
 ## Errors and observability
 
@@ -246,6 +250,8 @@ for module in . backend/disk backend/postgres backend/redis backend/valkey backe
 done
 pre-commit run --all-files
 ```
+
+Integration CI runs the same race-enabled checks against Redis, Dragonfly, Valkey, Memcached, Hazelcast, and PostgreSQL. Tag builds additionally disable workspaces with `GOWORK=off` and verify the tagged module against its released dependencies. Publish dependency tags before dependents: root first, then Redis, then the other backend modules.
 
 Local implementation plans under `docs/` and local workspaces are intentionally ignored by Git.
 
