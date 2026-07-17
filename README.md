@@ -1,54 +1,253 @@
 # go-cache
 
-Typed, composable, layered caches with pluggable stores and distributed invalidation for Go.
+`go-cache` provides typed, composable caches for Go: bounded in-process storage, layered promotion, pull-through loading, negative entries, renewable fill leases, and transport-neutral invalidation.
 
-> **Status:** Existing experimental implementation; API hardening and platform integration are planned.
+The repository is private and requires Go 1.26 or newer. Cache data is assumed to be reconstructible and disposable; correctness-critical state belongs in a durable system of record.
 
-Module path: `github.com/justusschock/go-cache`
+## Installation
 
-## Scope
+Configure private-module access and authenticate GitHub through your normal Git credential flow:
 
-Typed cache and store contracts, memory and remote backends, layered promotion, single-flight fills, TTLs, and reconstructible-state invalidation.
+```bash
+go env -w GOPRIVATE='github.com/justusschock/*'
+go env -w GONOSUMDB='github.com/justusschock/*'
+go get github.com/justusschock/go-cache@v0.1.0
+```
 
-This library is private and intended for reuse by future Go projects.
+The root module depends on the tagged `go-concurrency`, `go-messaging`, and `go-distributed-coordination` modules. Database and remote-cache clients are isolated in separately versioned nested modules, so they do not enter the root dependency graph.
 
-## Target platform dependencies
+## Basic use
 
-Required imports:
+```go
+package main
 
-- [`go-concurrency`](https://github.com/justusschock/go-concurrency)
-- [`go-messaging`](https://github.com/justusschock/go-messaging)
-- [`go-distributed-coordination`](https://github.com/justusschock/go-distributed-coordination)
+import (
+	"context"
+	"time"
 
-Optional adapter imports:
+	cache "github.com/justusschock/go-cache"
+	"github.com/justusschock/go-cache/backend/memory"
+)
 
-None currently planned.
+type User struct {
+	ID   string
+	Name string
+}
 
-Optional integrations must remain one-way: concrete adapters import their neutral contracts, never the reverse.
+func main() {
+	store := memory.New[string, User]()
+	defer store.Close()
 
-## Design constraints
+	users, err := cache.New("users", 5*time.Minute, store)
+	if err != nil {
+		panic(err)
+	}
 
-- Keep public contracts independent of product-specific resource types.
-- Keep the dependency graph acyclic; imports point toward lower-level mechanisms.
-- Put generic lifecycle transfer in `go-lifecycle/handoff` and finite resource-right transfer in `go-resources/handoff`.
-- Use `go-cache` only for reconstructible, disposable state, never correctness-critical state.
+	ctx := context.Background()
+	if err := users.Set(ctx, "user-42", User{ID: "user-42", Name: "Ada"}); err != nil {
+		panic(err)
+	}
+	user, found, err := users.Get(ctx, "user-42")
+	_, _, _ = user, found, err
+}
+```
+
+`memory.New` is globally bounded to 10,000 live entries and sweeps expired entries once per minute. Use `memory.NewWithOptions` to choose both limits explicitly:
+
+```go
+store, err := memory.NewWithOptions[string, User](memory.Options{
+	MaxEntries:     50_000,
+	CleanupInterval: 15 * time.Second,
+})
+if err != nil {
+	return err
+}
+defer store.Close()
+```
+
+The store uses a global least-recently-used order across namespaces. Reads refresh recency, expiration and invalidation remove entries from the order, and `Close` is idempotent.
+
+## Layered caches
+
+Stores are ordered from fastest to slowest. A lower-layer hit is promoted into every missed upper layer without changing its expiration. Writes start at the slowest layer, then proceed toward the fastest layer.
+
+```go
+fast := memory.New[string, User]()
+defer fast.Close()
+shared := memory.New[string, User]()
+defer shared.Close()
+
+layers, err := cache.NewLayered([]cache.Store[string, User]{fast, shared})
+if err != nil {
+	return err
+}
+users, err := cache.New("users", 5*time.Minute, layers)
+```
+
+Reads fail open by default: a failed upper layer is reported through an optional `Observer`, and lookup continues below it. `cache.WithStrictLayerReads()` makes the first layer error terminal. A slowest-layer write failure stops the write; errors from upper-layer writes are joined.
+
+## Pull-through loading
+
+`NewPullThrough` shares one typed future per key. Each caller waits with its own context, so canceling a waiter does not cancel a fill needed by other callers. Loader errors are never cached.
+
+```go
+store := memory.New[string, User]()
+defer store.Close()
+users, err := cache.New("users", 5*time.Minute, store)
+if err != nil {
+	return err
+}
+
+loaded, err := cache.NewPullThrough(
+	"users",
+	users,
+	func(ctx context.Context, id string) (User, bool, error) {
+		return database.FindUser(ctx, id)
+	},
+	cache.WithNegativeTTL[string](30*time.Second),
+)
+if err != nil {
+	return err
+}
+```
+
+Authoritative misses are stored as `Entry.Found == false` only when the wrapped cache implements `EntryCache`; `StandardCache` does. A custom implementation of only `Cache` remains supported, but misses are loaded again rather than retained in hidden process-local state.
+
+For cross-process fill coordination, adapt any `go-distributed-coordination` backend:
+
+```go
+coordinationBackend := coordinationmemory.NewBackend(nil)
+locker, err := cache.NewCoordinationLocker(
+	coordinationBackend,
+	"worker-7",
+	func(namespace, key string) (string, error) { return namespace + "/" + key, nil },
+)
+if err != nil {
+	return err
+}
+
+loaded, err := cache.NewPullThrough(
+	"users",
+	users,
+	loadUser,
+	cache.WithLocker[string](locker, 10*time.Second),
+)
+```
+
+Observable lease loss or renewal failure cancels the loader, waits for it to return, releases the lease with a non-canceled context, and returns `ErrFillLeaseLost` without starting a cache write. Loaders used with leases must honor context cancellation. These leases reduce duplicate fills; they are not a substitute for fenced writes in a correctness-critical data store.
+
+## Distributed invalidation
+
+`LayeredStore` can publish typed invalidations through any `InvalidationBus`. `Set` and `Invalidate` publish a key-scoped event; `InvalidateAll` publishes a namespace-scoped event. Listeners only evict upper layers, making duplicate and out-of-order delivery safe. `InvalidationEvent.Generation` is transport metadata, not a globally ordered revision.
+
+`MessagingInvalidationBus` adapts typed `go-messaging` publishers and subscribers:
+
+```go
+broker := messagingmemory.NewBroker[cache.InvalidationEvent[string]](10 * time.Millisecond)
+defer broker.Close()
+
+bus, err := cache.NewMessagingInvalidationBus[string](
+	broker,
+	broker,
+	func(namespace string) messaging.Subscription {
+		return messaging.Subscription{
+			Subject:     "cache.invalidations." + namespace,
+			Consumer:    "worker-7",
+			Semantics:   messaging.AtLeastOnce,
+			MaxInFlight: 32,
+		}
+	},
+)
+if err != nil {
+	return err
+}
+
+layers, err := cache.NewLayeredWithInvalidationBus(
+	[]cache.Store[string, User]{local, shared},
+	bus,
+)
+if err != nil {
+	return err
+}
+
+listenCtx, stop := context.WithCancel(ctx)
+defer stop()
+go func() {
+	_ = layers.ListenInvalidations(listenCtx, "users", 1)
+}()
+```
+
+`Subscribe` follows the messaging lifetime contract and normally blocks until its context ends. Successfully handled and namespace-mismatched deliveries are acknowledged; handler failures are negatively acknowledged for at-least-once retry.
+
+## Store and adapter contracts
+
+`Store[K,V]` persists `Entry[V]` values under a string namespace. A returned `present` flag distinguishes an absent record from a stored negative entry. Stores must hide logically expired records, isolate namespaces, make missing-key invalidation idempotent, and honor canceled contexts.
+
+`StandardCache` owns namespace and TTL policy. It exposes ordinary value operations through `Cache` and entry-aware operations through `EntryCache`. `SetEntry` rejects entries that are already expired.
+
+The automatic `Codec[T]` directly encodes strings, byte slices, booleans, numeric scalars, and JSON-compatible composites. Interface values require a custom codec because their concrete decode type is ambiguous.
+
+## Optional backend modules
+
+Install only the backend needed by an application. Every nested module requires its matching `backend/<name>/v0.1.0` repository tag.
+
+| Module | Store | Locker | Invalidation bus |
+| --- | --- | --- | --- |
+| `backend/disk` (bbolt) | yes | no | no |
+| `backend/postgres` | yes | yes | yes |
+| `backend/redis` | yes | yes | yes |
+| `backend/valkey` | yes | yes | yes |
+| `backend/dragonfly` | yes | yes | yes |
+| `backend/memcached` | yes | yes | no |
+| `backend/hazelcast` | yes | yes | yes |
+
+For example:
+
+```bash
+go get github.com/justusschock/go-cache/backend/redis@v0.1.0
+```
+
+Remote clients and connection pools remain caller-owned. The bbolt store owns its file handle and must be closed. PostgreSQL requires an explicit idempotent `Migrate` call. Integration tests are opt-in with the `integration` build tag.
+
+## Errors and observability
+
+Stable sentinel errors support `errors.Is`. Important cases include invalid namespace/TTL/store configuration, invalid memory options, missing layered-cache dependencies, loader panic, lock contention, lost fill leases, and invalid messaging/coordination adapter dependencies.
+
+Layered fail-open errors are available through `Observer` without exposing cache keys or values. The library deliberately does not prescribe metrics, tracing, or logging implementations.
+
+## Non-goals
+
+This module does not provide:
+
+- a correctness-critical database, write-through persistence, or transactions;
+- strong cache coherence, exactly-once invalidation, or total event ordering;
+- fenced database writes after a distributed lease changes ownership;
+- connection management, service discovery, credentials, or infrastructure provisioning;
+- product-specific keys, resources, or codecs.
 
 ## Development
 
-Install and run the repository hooks:
+The root and heavyweight backends are separate Go modules. Before the first release tag exists, create an ignored workspace for local cross-module testing:
 
 ```bash
-pre-commit install
+go work init .
+go work use backend/disk backend/postgres backend/redis backend/valkey
+go work use backend/dragonfly backend/memcached backend/hazelcast
+go work edit -go=1.26
+go work edit -replace=github.com/justusschock/go-cache@v0.1.0=.
+go work edit -replace=github.com/justusschock/go-cache/backend/redis@v0.1.0=./backend/redis
+```
+
+Run the same verification matrix as CI:
+
+```bash
+for module in . backend/disk backend/postgres backend/redis backend/valkey backend/dragonfly backend/memcached backend/hazelcast; do
+  (cd "$module" && go test -race ./... && go vet ./...) || exit 1
+done
 pre-commit run --all-files
 ```
 
-Once the module implementation exists, run its Go checks with:
-
-```bash
-go test ./...
-```
-
-Local implementation plans live under `docs/` and are intentionally excluded from Git.
+Local implementation plans under `docs/` and local workspaces are intentionally ignored by Git.
 
 ## License
 
