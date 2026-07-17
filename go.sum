@@ -33,6 +33,8 @@ github.com/justusschock/go-concurrency v0.1.0 h1:fc+Gldg1jVimoEEnC6lw3U4bgBU9IgN
 github.com/justusschock/go-concurrency v0.1.0/go.mod h1:Z6zdzwTP9zox+gYLvaY/f3gsnGJKEy+GqO2w9l3wBaU=
 github.com/justusschock/go-distributed-coordination v0.1.0 h1:aUB6eHKk8RLQNlSt7bJdBcD1eEY69cQYdKxbDVz6Xd4=
 github.com/justusschock/go-distributed-coordination v0.1.0/go.mod h1:wcS/43ZL/GsrtxbxoaXHyYQAqk3xkdqsTizmgPFf5PM=
+github.com/justusschock/go-messaging v0.1.0 h1:XPro2UI57id3JAIiXDqnx9h3KKz0Jal4Mpd2BzI9aHA=
+github.com/justusschock/go-messaging v0.1.0/go.mod h1:TtHcN4+0ehzWRVkj8KJCj11Lw4JMexTy41tXZBaEjVY=
 github.com/klauspost/cpuid/v2 v2.0.9 h1:lgaqFMSdTdQYdZ04uHyN2d/eKdOMyi2YLSvlQIBFYa4=
 github.com/klauspost/cpuid/v2 v2.0.9/go.mod h1:FInQzS24/EEf25PyTYn52gqo7WaD8xa0213Md/qVLRg=
 github.com/kr/pretty v0.3.0 h1:WgNl7dwNpEZ6jJ9k1snq4pZsg7DOEN8hP9Xw0Tsjwk0=
