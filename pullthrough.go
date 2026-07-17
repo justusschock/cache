@@ -252,6 +252,9 @@ func (c *PullThroughCache[K, V]) acquire(ctx context.Context, key K) (Lease, V, 
 	for {
 		lease, err := c.config.locker.Lock(ctx, c.namespace, key, c.config.leaseTTL)
 		if err == nil {
+			if isNil(lease) {
+				return nil, zero, false, false, ErrNilLease
+			}
 			return lease, zero, false, false, nil
 		}
 		if !errors.Is(err, ErrLockNotAcquired) {
