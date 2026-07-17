@@ -12,9 +12,15 @@ type loadResult[V any] struct {
 	found bool
 }
 
+type flightCall[V any] struct {
+	future  *concurrency.Future[loadResult[V]]
+	cancel  context.CancelFunc
+	waiters int
+}
+
 type flightGroup[K comparable, V any] struct {
 	mu    sync.Mutex
-	calls map[K]*concurrency.Future[loadResult[V]]
+	calls map[K]*flightCall[V]
 }
 
 func (g *flightGroup[K, V]) Do(
@@ -24,41 +30,42 @@ func (g *flightGroup[K, V]) Do(
 ) (V, bool, error) {
 	g.mu.Lock()
 	if g.calls == nil {
-		g.calls = make(map[K]*concurrency.Future[loadResult[V]])
+		g.calls = make(map[K]*flightCall[V])
 	}
-	future, ok := g.calls[key]
+	call, ok := g.calls[key]
 	if ok {
-		_, _, complete := future.Try()
+		_, _, complete := call.future.Try()
 		if complete {
 			delete(g.calls, key)
+			call.cancel()
 			ok = false
 		}
 	}
 	if !ok {
 		loadCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-		future = concurrency.Go(loadCtx, func(ctx context.Context) (loadResult[V], error) {
+		call = &flightCall[V]{cancel: cancel}
+		call.future = concurrency.Go(loadCtx, func(ctx context.Context) (loadResult[V], error) {
 			value, found, err := fn(ctx)
 			return loadResult[V]{value: value, found: found}, err
 		})
-		g.calls[key] = future
-		go g.removeWhenDone(key, future, cancel)
+		g.calls[key] = call
 	}
+	call.waiters++
 	g.mu.Unlock()
 
-	result, err := future.Await(ctx)
+	result, err := call.future.Await(ctx)
+	g.depart(key, call)
 	return result.value, result.found, err
 }
 
-func (g *flightGroup[K, V]) removeWhenDone(
-	key K,
-	future *concurrency.Future[loadResult[V]],
-	cancel context.CancelFunc,
-) {
-	<-future.Done()
+func (g *flightGroup[K, V]) depart(key K, call *flightCall[V]) {
 	g.mu.Lock()
-	if g.calls[key] == future {
-		delete(g.calls, key)
+	call.waiters--
+	if call.waiters == 0 {
+		if g.calls[key] == call {
+			delete(g.calls, key)
+		}
+		call.cancel()
 	}
 	g.mu.Unlock()
-	cancel()
 }
