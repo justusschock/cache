@@ -81,6 +81,29 @@ func (r *eventRecorder) Observe(_ context.Context, event cache.Event) {
 	r.events = append(r.events, event)
 }
 
+type recordingInvalidationBus[K comparable] struct {
+	events     []cache.InvalidationEvent[K]
+	deliveries []cache.InvalidationEvent[K]
+}
+
+func (b *recordingInvalidationBus[K]) Publish(_ context.Context, event cache.InvalidationEvent[K]) error {
+	b.events = append(b.events, event)
+	return nil
+}
+
+func (b *recordingInvalidationBus[K]) Subscribe(
+	ctx context.Context,
+	_ string,
+	handler cache.InvalidationHandler[K],
+) error {
+	for _, event := range b.deliveries {
+		if err := handler(ctx, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func TestLayeredGetPromotesLowerHitWithoutChangingExpiration(t *testing.T) {
 	log := &layerLog{}
 	fast := newLayerStore("fast", log)
@@ -142,6 +165,51 @@ func TestLayeredSetJoinsUpperLayerErrors(t *testing.T) {
 	assert.ErrorIs(t, err, fastErr)
 	assert.ErrorIs(t, err, middleErr)
 	assert.Equal(t, []string{"set:slow", "set:middle", "set:fast"}, log.snapshot())
+}
+
+func TestLayeredPublishesExactInvalidationScopes(t *testing.T) {
+	bus := &recordingInvalidationBus[string]{}
+	layered, err := cache.NewLayeredWithInvalidationBus(
+		[]cache.Store[string, string]{newLayerStore("only", &layerLog{})},
+		bus,
+	)
+	require.NoError(t, err)
+
+	entry := cache.Entry[string]{Value: "value", Found: true, ExpiresAt: time.Now().Add(time.Minute)}
+	require.NoError(t, layered.Set(context.Background(), "users", "alice", entry))
+	require.NoError(t, layered.Invalidate(context.Background(), "users", "alice"))
+	require.NoError(t, layered.InvalidateAll(context.Background(), "users"))
+
+	assert.Equal(t, []cache.InvalidationEvent[string]{
+		{Namespace: "users", Kind: cache.InvalidateKey, Key: "alice"},
+		{Namespace: "users", Kind: cache.InvalidateKey, Key: "alice"},
+		{Namespace: "users", Kind: cache.InvalidateNamespace},
+	}, bus.events)
+}
+
+func TestListenerTreatsDuplicateAndOutOfOrderEventsAsEvictions(t *testing.T) {
+	log := &layerLog{}
+	upper := newLayerStore("upper", log)
+	lower := newLayerStore("lower", log)
+	expiresAt := time.Now().Add(time.Minute)
+	upper.entries["alice"] = cache.Entry[string]{Value: "stale", Found: true, ExpiresAt: expiresAt}
+	upper.entries["bob"] = cache.Entry[string]{Value: "fresh", Found: true, ExpiresAt: expiresAt}
+	bus := &recordingInvalidationBus[string]{deliveries: []cache.InvalidationEvent[string]{
+		{Namespace: "users", Kind: cache.InvalidateKey, Key: "alice", Generation: 9},
+		{Namespace: "users", Kind: cache.InvalidateKey, Key: "alice", Generation: 2},
+		{Namespace: "users", Kind: cache.InvalidateKey, Key: "alice", Generation: 2},
+	}}
+	layered, err := cache.NewLayeredWithInvalidationBus(
+		[]cache.Store[string, string]{upper, lower},
+		bus,
+	)
+	require.NoError(t, err)
+
+	require.NoError(t, layered.ListenInvalidations(context.Background(), "users", 1))
+	_, alicePresent := upper.entries["alice"]
+	_, bobPresent := upper.entries["bob"]
+	assert.False(t, alicePresent)
+	assert.True(t, bobPresent)
 }
 
 func TestLayeredReadCanFailOpenOrStrict(t *testing.T) {

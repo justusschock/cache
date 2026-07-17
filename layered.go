@@ -156,7 +156,7 @@ func (s *LayeredStore[K, V]) Invalidate(ctx context.Context, namespace string, k
 		}
 	}
 	if s.bus != nil {
-		if err := s.bus.Publish(ctx, InvalidationEvent[K]{Namespace: namespace, Kind: InvalidateNamespace}); err != nil {
+		if err := s.bus.Publish(ctx, InvalidationEvent[K]{Namespace: namespace, Kind: InvalidateKey, Key: key}); err != nil {
 			joined = errors.Join(joined, fmt.Errorf("cache publish invalidation: %w", err))
 		}
 	}
@@ -200,6 +200,11 @@ func (s *LayeredStore[K, V]) InvalidateAll(ctx context.Context, namespace string
 	for index, layer := range s.layers {
 		if err := layer.InvalidateAll(ctx, namespace); err != nil {
 			joined = errors.Join(joined, fmt.Errorf("cache layer %d invalidate all: %w", index, err))
+		}
+	}
+	if s.bus != nil {
+		if err := s.bus.Publish(ctx, InvalidationEvent[K]{Namespace: namespace, Kind: InvalidateNamespace}); err != nil {
+			joined = errors.Join(joined, fmt.Errorf("cache publish invalidation: %w", err))
 		}
 	}
 	return joined
