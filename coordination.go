@@ -29,7 +29,7 @@ func NewCoordinationLocker[K comparable](
 	owner string,
 	key FillKeyFunc[K],
 ) (*CoordinationLocker[K], error) {
-	if backend == nil {
+	if isNil(backend) {
 		return nil, ErrNilCoordinationBackend
 	}
 	if owner == "" {
@@ -58,12 +58,12 @@ func (l *CoordinationLocker[K]) Lock(
 		Key:   fillKey,
 		Owner: l.owner,
 		TTL:   ttl,
-		Wait:  true,
+		Wait:  false,
 	})
 	if err != nil {
 		return nil, mapCoordinationError(err)
 	}
-	if lease == nil {
+	if isNil(lease) {
 		return nil, ErrNilCoordinationLease
 	}
 	return &coordinationLease{lease: lease}, nil

@@ -44,7 +44,7 @@ func WithNegativeTTL[K comparable](ttl time.Duration) PullThroughOption[K] {
 // WithLocker enables distributed miss coordination using renewable leases.
 func WithLocker[K comparable](locker Locker[K], leaseTTL time.Duration) PullThroughOption[K] {
 	return func(config *pullThroughConfig[K]) error {
-		if locker == nil {
+		if isNil(locker) {
 			return ErrNilLocker
 		}
 		if leaseTTL <= 0 {
@@ -105,7 +105,7 @@ func NewPullThrough[K comparable, V any](namespace string, wrapped Cache[K, V], 
 	if namespace == "" {
 		return nil, ErrEmptyNamespace
 	}
-	if wrapped == nil {
+	if isNil(wrapped) {
 		return nil, ErrNilCache
 	}
 	if loader == nil {
@@ -223,18 +223,20 @@ func (c *PullThroughCache[K, V]) load(ctx context.Context, key K) (V, bool, erro
 		lease = acquired
 		if lease != nil {
 			value, state, lookupErr := c.lookup(ctx, key)
+			releaseErr := error(nil)
 			if lookupErr != nil {
+				releaseErr = c.release(ctx, lease)
 				var zero V
-				return zero, false, lookupErr
+				return zero, false, errors.Join(lookupErr, releaseErr)
 			}
 			if state == lookupFound {
-				_ = c.release(ctx, lease)
-				return value, true, nil
+				releaseErr = c.release(ctx, lease)
+				return value, true, releaseErr
 			}
 			if state == lookupNegative {
-				_ = c.release(ctx, lease)
+				releaseErr = c.release(ctx, lease)
 				var zero V
-				return zero, false, nil
+				return zero, false, releaseErr
 			}
 		}
 	}

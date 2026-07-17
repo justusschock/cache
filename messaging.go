@@ -28,10 +28,10 @@ func NewMessagingInvalidationBus[K comparable](
 	subscriber messaging.Subscriber[InvalidationEvent[K]],
 	factory SubscriptionFactory,
 ) (*MessagingInvalidationBus[K], error) {
-	if publisher == nil {
+	if isNil(publisher) {
 		return nil, ErrNilMessagingPublisher
 	}
-	if subscriber == nil {
+	if isNil(subscriber) {
 		return nil, ErrNilMessagingSubscriber
 	}
 	if factory == nil {
@@ -45,7 +45,7 @@ func NewMessagingInvalidationBus[K comparable](
 }
 
 func (b *MessagingInvalidationBus[K]) Publish(ctx context.Context, event InvalidationEvent[K]) error {
-	envelope, err := messaging.NewEnvelope("cache.invalidations."+event.Namespace, event)
+	envelope, err := messaging.NewEnvelope(b.factory(event.Namespace).Subject, event)
 	if err != nil {
 		return fmt.Errorf("cache messaging envelope: %w", err)
 	}

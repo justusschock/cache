@@ -62,7 +62,7 @@ func NewLayered[K comparable, V any](layers []Store[K, V], options ...LayeredOpt
 
 // NewLayeredWithInvalidationBus constructs a layered store that publishes invalidations.
 func NewLayeredWithInvalidationBus[K comparable, V any](layers []Store[K, V], bus InvalidationBus[K], options ...LayeredOption) (*LayeredStore[K, V], error) {
-	if bus == nil {
+	if isNil(bus) {
 		return nil, ErrNoInvalidationBus
 	}
 	return newLayered(layers, bus, options...)
@@ -73,7 +73,7 @@ func newLayered[K comparable, V any](layers []Store[K, V], bus InvalidationBus[K
 		return nil, ErrNoLayers
 	}
 	for _, layer := range layers {
-		if layer == nil {
+		if isNil(layer) {
 			return nil, ErrNilStore
 		}
 	}

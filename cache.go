@@ -43,7 +43,7 @@ func New[K comparable, V any](namespace string, defaultTTL time.Duration, store 
 	if defaultTTL <= 0 {
 		return nil, ErrInvalidTTL
 	}
-	if store == nil {
+	if isNil(store) {
 		return nil, ErrNilStore
 	}
 	return &StandardCache[K, V]{namespace: namespace, defaultTTL: defaultTTL, store: store}, nil

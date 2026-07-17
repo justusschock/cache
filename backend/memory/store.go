@@ -95,7 +95,7 @@ func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.E
 		return zero, false, nil
 	}
 	if record.generation != state.generation || !record.entry.ExpiresAt.After(time.Now()) {
-		s.remove(state, key, record)
+		s.remove(namespace, state, key, record)
 		return zero, false, nil
 	}
 	s.lru.MoveToFront(record.element)
@@ -144,7 +144,7 @@ func (s *Store[K, V]) Invalidate(ctx context.Context, namespace string, key K) e
 	}
 	if state, ok := s.namespaces[namespace]; ok {
 		if record, present := state.entries[key]; present {
-			s.remove(state, key, record)
+			s.remove(namespace, state, key, record)
 		}
 	}
 	return nil
@@ -160,12 +160,13 @@ func (s *Store[K, V]) InvalidateAll(ctx context.Context, namespace string) error
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	state := s.namespace(namespace)
-	for key, record := range state.entries {
-		s.remove(state, key, record)
+	state, ok := s.namespaces[namespace]
+	if !ok {
+		return nil
 	}
-	state.generation++
-	state.entries = make(map[K]record[K, V])
+	for key, record := range state.entries {
+		s.remove(namespace, state, key, record)
+	}
 	return nil
 }
 
@@ -190,9 +191,12 @@ func (s *Store[K, V]) namespace(namespace string) *namespaceState[K, V] {
 	return state
 }
 
-func (s *Store[K, V]) remove(state *namespaceState[K, V], key K, record record[K, V]) {
+func (s *Store[K, V]) remove(namespace string, state *namespaceState[K, V], key K, record record[K, V]) {
 	delete(state.entries, key)
 	s.lru.Remove(record.element)
+	if len(state.entries) == 0 {
+		delete(s.namespaces, namespace)
+	}
 }
 
 func (s *Store[K, V]) evictOldest() {
@@ -201,13 +205,17 @@ func (s *Store[K, V]) evictOldest() {
 		return
 	}
 	item := element.Value.(itemKey[K])
-	state := s.namespaces[item.namespace]
+	state, ok := s.namespaces[item.namespace]
+	if !ok {
+		s.lru.Remove(element)
+		return
+	}
 	record, ok := state.entries[item.key]
 	if !ok || record.element != element {
 		s.lru.Remove(element)
 		return
 	}
-	s.remove(state, item.key, record)
+	s.remove(item.namespace, state, item.key, record)
 }
 
 func (s *Store[K, V]) sweep(interval time.Duration) {
@@ -227,10 +235,10 @@ func (s *Store[K, V]) sweep(interval time.Duration) {
 func (s *Store[K, V]) removeExpired(now time.Time) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, state := range s.namespaces {
+	for namespace, state := range s.namespaces {
 		for key, record := range state.entries {
 			if record.generation != state.generation || !record.entry.ExpiresAt.After(now) {
-				s.remove(state, key, record)
+				s.remove(namespace, state, key, record)
 			}
 		}
 	}
