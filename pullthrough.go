@@ -151,8 +151,8 @@ func (c *PullThroughCache[K, V]) Get(ctx context.Context, key K) (V, bool, error
 		return zero, false, nil
 	}
 
-	return c.flights.Do(ctx, key, func() (V, bool, error) {
-		value, state, err := c.lookup(ctx, key)
+	return c.flights.Do(ctx, key, func(loadCtx context.Context) (V, bool, error) {
+		value, state, err := c.lookup(loadCtx, key)
 		if err != nil {
 			var zero V
 			return zero, false, err
@@ -164,7 +164,7 @@ func (c *PullThroughCache[K, V]) Get(ctx context.Context, key K) (V, bool, error
 			var zero V
 			return zero, false, nil
 		}
-		return c.load(ctx, key)
+		return c.load(loadCtx, key)
 	})
 }
 
@@ -394,43 +394,4 @@ func (c *PullThroughCache[K, V]) release(ctx context.Context, lease Lease) error
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.config.leaseTTL)
 	defer cancel()
 	return lease.Release(releaseCtx)
-}
-
-type flightCall[V any] struct {
-	done  chan struct{}
-	value V
-	found bool
-	err   error
-}
-
-type flightGroup[K comparable, V any] struct {
-	mu    sync.Mutex
-	calls map[K]*flightCall[V]
-}
-
-func (g *flightGroup[K, V]) Do(ctx context.Context, key K, fn func() (V, bool, error)) (V, bool, error) {
-	g.mu.Lock()
-	if g.calls == nil {
-		g.calls = make(map[K]*flightCall[V])
-	}
-	if call, ok := g.calls[key]; ok {
-		g.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			var zero V
-			return zero, false, ctx.Err()
-		case <-call.done:
-			return call.value, call.found, call.err
-		}
-	}
-	call := &flightCall[V]{done: make(chan struct{})}
-	g.calls[key] = call
-	g.mu.Unlock()
-
-	call.value, call.found, call.err = fn()
-	g.mu.Lock()
-	delete(g.calls, key)
-	close(call.done)
-	g.mu.Unlock()
-	return call.value, call.found, call.err
 }
