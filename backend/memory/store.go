@@ -2,32 +2,76 @@
 package memory
 
 import (
+	"container/list"
 	"context"
+	"errors"
 	"sync"
 	"time"
 
 	cache "github.com/justusschock/go-cache"
 )
 
-type record[V any] struct {
+var ErrInvalidOptions = errors.New("cache memory: invalid options")
+
+const (
+	defaultMaxEntries      = 10_000
+	defaultCleanupInterval = time.Minute
+)
+
+type Options struct {
+	MaxEntries      int
+	CleanupInterval time.Duration
+}
+
+type itemKey[K comparable] struct {
+	namespace string
+	key       K
+}
+
+type record[K comparable, V any] struct {
 	entry      cache.Entry[V]
 	generation uint64
+	element    *list.Element
 }
 
 type namespaceState[K comparable, V any] struct {
 	generation uint64
-	entries    map[K]record[V]
+	entries    map[K]record[K, V]
 }
 
 // Store is an in-memory cache store protected by a mutex.
 type Store[K comparable, V any] struct {
 	mu         sync.Mutex
 	namespaces map[string]*namespaceState[K, V]
+	lru        *list.List
+	maxEntries int
+	stop       chan struct{}
+	done       chan struct{}
+	closeOnce  sync.Once
 }
 
-// New constructs an empty in-memory store.
+// New constructs an empty in-memory store with bounded defaults.
 func New[K comparable, V any]() *Store[K, V] {
-	return &Store[K, V]{namespaces: make(map[string]*namespaceState[K, V])}
+	store, _ := NewWithOptions[K, V](Options{
+		MaxEntries:      defaultMaxEntries,
+		CleanupInterval: defaultCleanupInterval,
+	})
+	return store
+}
+
+func NewWithOptions[K comparable, V any](options Options) (*Store[K, V], error) {
+	if options.MaxEntries <= 0 || options.CleanupInterval <= 0 {
+		return nil, ErrInvalidOptions
+	}
+	store := &Store[K, V]{
+		namespaces: make(map[string]*namespaceState[K, V]),
+		lru:        list.New(),
+		maxEntries: options.MaxEntries,
+		stop:       make(chan struct{}),
+		done:       make(chan struct{}),
+	}
+	go store.sweep(options.CleanupInterval)
+	return store, nil
 }
 
 func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.Entry[V], bool, error) {
@@ -47,13 +91,14 @@ func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.E
 		return zero, false, nil
 	}
 	record, ok := state.entries[key]
-	if !ok || record.generation != state.generation {
+	if !ok {
 		return zero, false, nil
 	}
-	if !record.entry.ExpiresAt.After(time.Now()) {
-		delete(state.entries, key)
+	if record.generation != state.generation || !record.entry.ExpiresAt.After(time.Now()) {
+		s.remove(state, key, record)
 		return zero, false, nil
 	}
+	s.lru.MoveToFront(record.element)
 	return record.entry, true, nil
 }
 
@@ -68,7 +113,22 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 		return err
 	}
 	state := s.namespace(namespace)
-	state.entries[key] = record[V]{entry: entry, generation: state.generation}
+	if existing, ok := state.entries[key]; ok {
+		existing.entry = entry
+		existing.generation = state.generation
+		state.entries[key] = existing
+		s.lru.MoveToFront(existing.element)
+	} else {
+		element := s.lru.PushFront(itemKey[K]{namespace: namespace, key: key})
+		state.entries[key] = record[K, V]{
+			entry:      entry,
+			generation: state.generation,
+			element:    element,
+		}
+	}
+	for s.lru.Len() > s.maxEntries {
+		s.evictOldest()
+	}
 	return nil
 }
 
@@ -83,7 +143,9 @@ func (s *Store[K, V]) Invalidate(ctx context.Context, namespace string, key K) e
 		return err
 	}
 	if state, ok := s.namespaces[namespace]; ok {
-		delete(state.entries, key)
+		if record, present := state.entries[key]; present {
+			s.remove(state, key, record)
+		}
 	}
 	return nil
 }
@@ -99,16 +161,77 @@ func (s *Store[K, V]) InvalidateAll(ctx context.Context, namespace string) error
 		return err
 	}
 	state := s.namespace(namespace)
+	for key, record := range state.entries {
+		s.remove(state, key, record)
+	}
 	state.generation++
-	state.entries = make(map[K]record[V])
+	state.entries = make(map[K]record[K, V])
+	return nil
+}
+
+func (s *Store[K, V]) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lru.Len()
+}
+
+func (s *Store[K, V]) Close() error {
+	s.closeOnce.Do(func() { close(s.stop) })
+	<-s.done
 	return nil
 }
 
 func (s *Store[K, V]) namespace(namespace string) *namespaceState[K, V] {
 	state, ok := s.namespaces[namespace]
 	if !ok {
-		state = &namespaceState[K, V]{entries: make(map[K]record[V])}
+		state = &namespaceState[K, V]{entries: make(map[K]record[K, V])}
 		s.namespaces[namespace] = state
 	}
 	return state
+}
+
+func (s *Store[K, V]) remove(state *namespaceState[K, V], key K, record record[K, V]) {
+	delete(state.entries, key)
+	s.lru.Remove(record.element)
+}
+
+func (s *Store[K, V]) evictOldest() {
+	element := s.lru.Back()
+	if element == nil {
+		return
+	}
+	item := element.Value.(itemKey[K])
+	state := s.namespaces[item.namespace]
+	record, ok := state.entries[item.key]
+	if !ok || record.element != element {
+		s.lru.Remove(element)
+		return
+	}
+	s.remove(state, item.key, record)
+}
+
+func (s *Store[K, V]) sweep(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	defer close(s.done)
+	for {
+		select {
+		case <-ticker.C:
+			s.removeExpired(time.Now())
+		case <-s.stop:
+			return
+		}
+	}
+}
+
+func (s *Store[K, V]) removeExpired(now time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, state := range s.namespaces {
+		for key, record := range state.entries {
+			if record.generation != state.generation || !record.entry.ExpiresAt.After(now) {
+				s.remove(state, key, record)
+			}
+		}
+	}
 }
