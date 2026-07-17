@@ -139,6 +139,12 @@ type fakeLocker struct {
 	err   error
 }
 
+type nilLeaseLocker struct{}
+
+func (nilLeaseLocker) Lock(context.Context, string, string, time.Duration) (cache.Lease, error) {
+	return nil, nil
+}
+
 type plainCache struct {
 	getCalls atomic.Int32
 }
@@ -365,6 +371,25 @@ func TestNewPullThroughRejectsInvalidConfiguration(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrNilLoader)
 	_, err = cache.NewPullThrough("users", base, loader, cache.WithNegativeTTL[string](0))
 	assert.ErrorIs(t, err, cache.ErrInvalidTTL)
+}
+
+func TestPullThroughRejectsNilSuccessfulLease(t *testing.T) {
+	base := newMemoryCache(t)
+	loader := func(context.Context, string) (string, bool, error) { return "loaded", true, nil }
+	for name, locker := range map[string]cache.Locker[string]{
+		"nil":       nilLeaseLocker{},
+		"typed nil": &fakeLocker{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pull, err := cache.NewPullThrough(
+				"users", base, loader, cache.WithLocker[string](locker, time.Minute),
+			)
+			require.NoError(t, err)
+
+			_, _, err = pull.Get(context.Background(), "alice-"+name)
+			assert.ErrorIs(t, err, cache.ErrNilLease)
+		})
+	}
 }
 
 type stagedEntryCache struct {
