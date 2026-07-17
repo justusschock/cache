@@ -65,7 +65,7 @@ if err != nil {
 defer store.Close()
 ```
 
-The store uses a global least-recently-used order across namespaces. Reads refresh recency, expiration and invalidation remove entries from the order, and `Close` is idempotent.
+The store uses a global least-recently-used order across namespaces. Reads refresh recency, expiration and invalidation remove entries from the order, and `Close` is idempotent. Every memory store must be closed: construction starts an expiration-sweeper goroutine, and omitting `Close` leaves that goroutine running for the lifetime of the process.
 
 ## Layered caches
 
@@ -88,7 +88,7 @@ Reads fail open by default: a failed upper layer is reported through an optional
 
 ## Pull-through loading
 
-`NewPullThrough` shares one typed future per key. Each caller waits with its own context, so canceling a waiter does not cancel a fill needed by other callers. Loader errors are never cached.
+`NewPullThrough` shares one typed future per key. Each caller waits with its own context, so canceling a waiter does not cancel a fill needed by other callers. When the last waiter departs, the fill context is canceled and the flight is removed; a later request starts a fresh fill lifecycle even if the abandoned loader has not returned yet. Loader errors are never cached.
 
 ```go
 store := memory.New[string, User]()
@@ -120,7 +120,10 @@ coordinationBackend := coordinationmemory.NewBackend(nil)
 locker, err := cache.NewCoordinationLocker(
 	coordinationBackend,
 	"worker-7",
-	func(namespace, key string) (string, error) { return namespace + "/" + key, nil },
+	func(namespace, key string) (string, error) {
+		encoded, err := json.Marshal([2]string{namespace, key})
+		return string(encoded), err
+	},
 )
 if err != nil {
 	return err
@@ -133,6 +136,8 @@ loaded, err := cache.NewPullThrough(
 	cache.WithLocker[string](locker, 10*time.Second),
 )
 ```
+
+`FillKeyFunc` is part of the coordination schema. Its output must be deterministic and injective over the complete `(namespace, key)` tuple. Delimiter concatenation is unsafe when either input may contain the delimiter because different tuples can map to the same lease. Keep the derivation stable across deployments and align its key semantics with the cache key codec.
 
 Observable lease loss or renewal failure cancels the loader, waits for it to return, and releases the lease with a non-canceled context. Loss detected before storage prevents the cache write from starting. If ownership changes while `Cache.Set` is already running, the write receives a canceled context and `Get` returns `ErrFillLeaseLost`, but the `Cache` interface cannot fence an implementation that has already committed or ignores cancellation. Loaders and cache implementations used with leases must honor context cancellation. These leases reduce duplicate fills; they are not a substitute for fenced writes in a correctness-critical data store.
 
@@ -187,7 +192,11 @@ go func() {
 
 The automatic `Codec[T]` directly encodes strings, byte slices, booleans, numeric scalars, and JSON-compatible composites. Interface values require a custom codec because their concrete decode type is ambiguous.
 
+The namespace, key type and codec, value type and codec, and persistent envelope format together define a shared cache schema. Reusing a namespace with incompatible codecs or types can alias keys or turn old values into decode failures. Keep that schema stable across every process sharing a backend; use a new namespace or an explicit invalidation/migration when making an incompatible change.
+
 Key identity depends on the backend. The memory backend uses Go `==` for `K`; serialized backends use the bytes produced by the key codec. In particular, two pointers to equal values are distinct memory keys but produce the same default JSON key. Prefer scalar or value keys when caches may be layered or swapped, or supply a custom codec whose byte identity matches the application's key semantics.
+
+Values are not deep-copied by the root API. The memory backend stores and returns reference-bearing values such as pointers, maps, and slices by reference, so callers must treat cached values as immutable, clone them at the application boundary, or provide their own synchronization. Serialized backends normally return newly decoded values, but that is a codec property rather than a `Cache` guarantee.
 
 ## Optional backend modules
 
@@ -209,15 +218,17 @@ For example:
 go get github.com/justusschock/go-cache/backend/redis@v0.1.0
 ```
 
-Remote clients and connection pools remain caller-owned; stores, lockers, and invalidation buses never close them. The bbolt store owns its file handle and must be closed. PostgreSQL requires an explicit idempotent `Migrate` call and uses the server clock for entry and lease expiration decisions. Persistent entry envelopes store expiration as signed seconds plus nanoseconds and continue to decode version-one nanosecond timestamps.
+Remote clients and connection pools remain caller-owned; stores, lockers, and invalidation buses never close them. The bbolt store owns its file handle and must be closed. PostgreSQL requires an explicit idempotent `Migrate` call and uses the server clock for entry and lease expiration decisions. Its `DeleteExpired` operation physically removes expired entry and lock rows and returns their combined count.
 
-Memcached rounds positive TTLs up to the nearest second and uses relative expiration for durations up to 30 days. Expirations after its signed 32-bit Unix range use server expiration `0`; the entry envelope still enforces logical expiry, while physical removal is left to Memcached eviction. Hazelcast intentionally has no `Locker`: its map API cannot atomically verify a lease token and extend that same value's TTL, so a two-command refresh could extend a successor's lease.
+Persistent entry envelopes write version two expiration as signed seconds plus nanoseconds and continue to decode version-one nanosecond timestamps. Wire changes require a reader-first rollout: every process that can read a shared namespace must understand a new version before any process writes it. If a dual-reader/write-old staging release is unavailable, cut the new writer fleet over to a new namespace instead of mixing incompatible readers and writers.
+
+Memcached rounds positive TTLs up to the nearest second and uses relative expiration for durations up to 30 days. Entry expirations after its signed 32-bit Unix range use server expiration `0`; the entry envelope still enforces logical expiry, while physical removal is left to Memcached eviction. Leases cannot safely use that fallback, so `Lock` and `Refresh` reject a TTL whose required absolute expiration exceeds the signed 32-bit Unix range. Lease release atomically replaces the owner token with a one-second tombstone and lets that tombstone expire rather than issuing a later delete that could remove a successor. Hazelcast intentionally has no `Locker`: its map API cannot atomically verify a lease token and extend that same value's TTL, so a two-command refresh could extend a successor's lease.
 
 ## Errors and observability
 
 Stable sentinel errors support `errors.Is`. Important cases include invalid namespace/TTL/store configuration, invalid memory options, missing layered-cache dependencies, loader panic, lock contention, lost fill leases, and invalid messaging/coordination adapter dependencies.
 
-Layered fail-open errors are available through `Observer` without exposing cache keys or values. The library deliberately does not prescribe metrics, tracing, or logging implementations.
+Layered fail-open errors are available through `Observer` without exposing cache keys or values. A nil or typed-nil optional observer is treated as absent. Every invalidation bus rejects a nil subscriber callback with `ErrNilInvalidationHandler`. The library deliberately does not prescribe metrics, tracing, or logging implementations.
 
 ## Non-goals
 
