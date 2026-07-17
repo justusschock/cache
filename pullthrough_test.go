@@ -119,8 +119,9 @@ func TestPullThroughSuppressesConcurrentLoads(t *testing.T) {
 }
 
 type fakeLease struct {
-	refreshes atomic.Int32
-	releases  atomic.Int32
+	refreshes  atomic.Int32
+	releases   atomic.Int32
+	releaseErr error
 }
 
 func (l *fakeLease) Refresh(context.Context, time.Duration) error {
@@ -130,7 +131,7 @@ func (l *fakeLease) Refresh(context.Context, time.Duration) error {
 
 func (l *fakeLease) Release(context.Context) error {
 	l.releases.Add(1)
-	return nil
+	return l.releaseErr
 }
 
 type fakeLocker struct {
@@ -364,4 +365,73 @@ func TestNewPullThroughRejectsInvalidConfiguration(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrNilLoader)
 	_, err = cache.NewPullThrough("users", base, loader, cache.WithNegativeTTL[string](0))
 	assert.ErrorIs(t, err, cache.ErrInvalidTTL)
+}
+
+type stagedEntryCache struct {
+	reads    atomic.Int32
+	thirdErr error
+}
+
+func (c *stagedEntryCache) GetEntry(context.Context, string) (cache.Entry[string], bool, error) {
+	if c.reads.Add(1) < 3 {
+		return cache.Entry[string]{}, false, nil
+	}
+	if c.thirdErr != nil {
+		return cache.Entry[string]{}, false, c.thirdErr
+	}
+	return cache.Entry[string]{Value: "loaded", Found: true, ExpiresAt: time.Now().Add(time.Minute)}, true, nil
+}
+
+func (c *stagedEntryCache) Get(ctx context.Context, key string) (string, bool, error) {
+	entry, present, err := c.GetEntry(ctx, key)
+	return entry.Value, present && entry.Found, err
+}
+
+func (*stagedEntryCache) Set(context.Context, string, string) error { return nil }
+func (*stagedEntryCache) SetWithTTL(context.Context, string, string, time.Duration) error {
+	return nil
+}
+func (*stagedEntryCache) SetEntry(context.Context, string, cache.Entry[string]) error { return nil }
+func (*stagedEntryCache) Invalidate(context.Context, string) error                    { return nil }
+func (*stagedEntryCache) InvalidateAll(context.Context) error                         { return nil }
+
+func TestPullThroughPostAcquireHitPropagatesReleaseError(t *testing.T) {
+	base := &stagedEntryCache{}
+	releaseErr := errors.New("release failed")
+	lease := &fakeLease{releaseErr: releaseErr}
+	pull, err := cache.NewPullThrough(
+		"users",
+		base,
+		func(context.Context, string) (string, bool, error) {
+			return "", false, errors.New("loader must not run")
+		},
+		cache.WithLocker[string](&fakeLocker{lease: lease}, time.Minute),
+	)
+	require.NoError(t, err)
+
+	value, found, err := pull.Get(context.Background(), "alice")
+	assert.Equal(t, "loaded", value)
+	assert.True(t, found)
+	assert.ErrorIs(t, err, releaseErr)
+	assert.Equal(t, int32(1), lease.releases.Load())
+}
+
+func TestPullThroughPostAcquireStrictLookupErrorStillReleases(t *testing.T) {
+	lookupErr := errors.New("lookup failed")
+	base := &stagedEntryCache{thirdErr: lookupErr}
+	lease := &fakeLease{}
+	pull, err := cache.NewPullThrough(
+		"users",
+		base,
+		func(context.Context, string) (string, bool, error) {
+			return "", false, errors.New("loader must not run")
+		},
+		cache.WithLocker[string](&fakeLocker{lease: lease}, time.Minute),
+		cache.WithStrictPullThroughReads[string](),
+	)
+	require.NoError(t, err)
+
+	_, _, err = pull.Get(context.Background(), "alice")
+	assert.ErrorIs(t, err, lookupErr)
+	assert.Equal(t, int32(1), lease.releases.Load())
 }

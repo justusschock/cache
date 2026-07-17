@@ -42,6 +42,15 @@ func TestLockerExpiredLeaseCanBeReplaced(t *testing.T) {
 	assert.NoError(t, replacement.Release(context.Background()))
 }
 
+func TestLockerReleaseRejectsNaturalExpiry(t *testing.T) {
+	locker := memory.NewLocker[string]()
+	lease, err := locker.Lock(context.Background(), "users", "alice", time.Millisecond)
+	require.NoError(t, err)
+	time.Sleep(10 * time.Millisecond)
+
+	assert.ErrorIs(t, lease.Release(context.Background()), cache.ErrLeaseLost)
+}
+
 func TestLockerAllowsOnlyOneConcurrentHolder(t *testing.T) {
 	locker := memory.NewLocker[string]()
 	const workers = 32

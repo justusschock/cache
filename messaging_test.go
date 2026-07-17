@@ -125,6 +125,23 @@ func TestMessagingBusPublishesTypedEnvelope(t *testing.T) {
 	assert.Equal(t, event, publisher.envelopes[0].Payload)
 }
 
+func TestMessagingBusPublishesToFactorySubject(t *testing.T) {
+	publisher := &messagingPublisher[string]{}
+	factory := func(namespace string) messaging.Subscription {
+		return messaging.Subscription{
+			Subject: "tenant-cache." + namespace, Consumer: "cache-test",
+			Semantics: messaging.AtLeastOnce, MaxInFlight: 1,
+		}
+	}
+	bus, err := cache.NewMessagingInvalidationBus(publisher, &messagingSubscriber[string]{}, factory)
+	require.NoError(t, err)
+	event := cache.InvalidationEvent[string]{Namespace: "users", Kind: cache.InvalidateNamespace}
+
+	require.NoError(t, bus.Publish(context.Background(), event))
+	require.Len(t, publisher.envelopes, 1)
+	assert.Equal(t, factory("users").Subject, publisher.envelopes[0].Subject)
+}
+
 func TestMessagingBusAcknowledgesHandledEvent(t *testing.T) {
 	delivery := invalidationDelivery(t, cache.InvalidationEvent[string]{
 		Namespace: "users", Kind: cache.InvalidateKey, Key: "alice",

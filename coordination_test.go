@@ -74,7 +74,7 @@ func TestCoordinationLockerMapsLeaseOperations(t *testing.T) {
 	lease, err := locker.Lock(context.Background(), "users", "alice", time.Minute)
 	require.NoError(t, err)
 	assert.Equal(t, coordination.AcquireRequest{
-		Key: "users/alice", Owner: "worker-1", TTL: time.Minute, Wait: true,
+		Key: "users/alice", Owner: "worker-1", TTL: time.Minute, Wait: false,
 	}, backend.request)
 
 	observable, ok := lease.(cache.ObservableLease)
