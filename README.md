@@ -264,6 +264,8 @@ pre-commit run --all-files
 
 Integration CI runs the same race-enabled checks against Redis, Dragonfly, Valkey, Memcached, Hazelcast, and PostgreSQL. Tag builds additionally disable workspaces with `GOWORK=off` and verify the tagged module against its released dependencies. Publish dependency tags before dependents: root first, then Redis, then the other backend modules.
 
+CI private-module access uses a GitHub App installation token before `setup-go` or any Go dependency command. Configure repository variable `GO_MODULES_APP_CLIENT_ID` and secret `GO_MODULES_APP_PRIVATE_KEY`; the workflow fails explicitly when either is absent. The token is limited to read-only contents access for the currently required repositories: `go-cache`, `go-concurrency`, `go-distributed-coordination`, and `go-messaging`. Add a repository to that explicit list when the module graph gains another private dependency. The runner sets `GOPRIVATE` and `GONOSUMDB` for `github.com/justusschock/*` and installs an ephemeral authenticated Git URL rewrite; it does not change developer credential configuration.
+
 Local implementation plans under `docs/` and local workspaces are intentionally ignored by Git.
 
 ## License

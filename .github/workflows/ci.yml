@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+env:
+  GOPRIVATE: "github.com/justusschock/*"
+  GONOSUMDB: "github.com/justusschock/*"
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -28,6 +32,44 @@ jobs:
         working-directory: ${{ matrix.module }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Require private module credentials
+        shell: bash
+        env:
+          CLIENT_ID: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
+          PRIVATE_KEY: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$CLIENT_ID" ]]; then
+            echo "::error title=Missing GitHub Actions variable::GO_MODULES_APP_CLIENT_ID is required for private Go modules"
+            exit 1
+          fi
+          if [[ -z "$PRIVATE_KEY" ]]; then
+            echo "::error title=Missing GitHub Actions secret::GO_MODULES_APP_PRIVATE_KEY is required for private Go modules"
+            exit 1
+          fi
+      - name: Mint private module token
+        id: go-modules-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
+          owner: justusschock
+          repositories: |
+            go-cache
+            go-concurrency
+            go-distributed-coordination
+            go-messaging
+          permission-contents: read
+      - name: Authenticate private module Git access
+        shell: bash
+        env:
+          GO_MODULES_TOKEN: ${{ steps.go-modules-token.outputs.token }}
+        run: |
+          auth_url="https://x-access-token:${GO_MODULES_TOKEN}@github.com/"
+          git config --global url."${auth_url}".insteadOf "https://github.com/"
+          git config --global --add url."${auth_url}".insteadOf "git@github.com:"
+          git config --global --add url."${auth_url}".insteadOf "ssh://git@github.com/"
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
@@ -112,6 +154,44 @@ jobs:
       POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/cache_test?sslmode=disable
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Require private module credentials
+        shell: bash
+        env:
+          CLIENT_ID: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
+          PRIVATE_KEY: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$CLIENT_ID" ]]; then
+            echo "::error title=Missing GitHub Actions variable::GO_MODULES_APP_CLIENT_ID is required for private Go modules"
+            exit 1
+          fi
+          if [[ -z "$PRIVATE_KEY" ]]; then
+            echo "::error title=Missing GitHub Actions secret::GO_MODULES_APP_PRIVATE_KEY is required for private Go modules"
+            exit 1
+          fi
+      - name: Mint private module token
+        id: go-modules-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
+          owner: justusschock
+          repositories: |
+            go-cache
+            go-concurrency
+            go-distributed-coordination
+            go-messaging
+          permission-contents: read
+      - name: Authenticate private module Git access
+        shell: bash
+        env:
+          GO_MODULES_TOKEN: ${{ steps.go-modules-token.outputs.token }}
+        run: |
+          auth_url="https://x-access-token:${GO_MODULES_TOKEN}@github.com/"
+          git config --global url."${auth_url}".insteadOf "https://github.com/"
+          git config --global --add url."${auth_url}".insteadOf "git@github.com:"
+          git config --global --add url."${auth_url}".insteadOf "ssh://git@github.com/"
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
@@ -154,6 +234,44 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Require private module credentials
+        shell: bash
+        env:
+          CLIENT_ID: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
+          PRIVATE_KEY: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$CLIENT_ID" ]]; then
+            echo "::error title=Missing GitHub Actions variable::GO_MODULES_APP_CLIENT_ID is required for private Go modules"
+            exit 1
+          fi
+          if [[ -z "$PRIVATE_KEY" ]]; then
+            echo "::error title=Missing GitHub Actions secret::GO_MODULES_APP_PRIVATE_KEY is required for private Go modules"
+            exit 1
+          fi
+      - name: Mint private module token
+        id: go-modules-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
+          private-key: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
+          owner: justusschock
+          repositories: |
+            go-cache
+            go-concurrency
+            go-distributed-coordination
+            go-messaging
+          permission-contents: read
+      - name: Authenticate private module Git access
+        shell: bash
+        env:
+          GO_MODULES_TOKEN: ${{ steps.go-modules-token.outputs.token }}
+        run: |
+          auth_url="https://x-access-token:${GO_MODULES_TOKEN}@github.com/"
+          git config --global url."${auth_url}".insteadOf "https://github.com/"
+          git config --global --add url."${auth_url}".insteadOf "git@github.com:"
+          git config --global --add url."${auth_url}".insteadOf "ssh://git@github.com/"
       - uses: actions/setup-go@v6
         with:
           go-version: "1.26"
