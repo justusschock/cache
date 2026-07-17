@@ -83,11 +83,6 @@ func WithStrictPullThroughReads[K comparable]() PullThroughOption[K] {
 	}
 }
 
-type entryAccess[K comparable, V any] interface {
-	getEntry(context.Context, K) (Entry[V], bool, error)
-	setEntry(context.Context, K, Entry[V]) error
-}
-
 type lookupState uint8
 
 const (
@@ -103,9 +98,6 @@ type PullThroughCache[K comparable, V any] struct {
 	loader    Loader[K, V]
 	config    pullThroughConfig[K]
 	flights   flightGroup[K, V]
-
-	negativeMu sync.Mutex
-	negative   map[K]time.Time
 }
 
 // NewPullThrough wraps a cache with automatic miss loading.
@@ -133,7 +125,6 @@ func NewPullThrough[K comparable, V any](namespace string, wrapped Cache[K, V], 
 		cache:     wrapped,
 		loader:    loader,
 		config:    config,
-		negative:  make(map[K]time.Time),
 	}, nil
 }
 
@@ -169,24 +160,18 @@ func (c *PullThroughCache[K, V]) Get(ctx context.Context, key K) (V, bool, error
 }
 
 func (c *PullThroughCache[K, V]) Set(ctx context.Context, key K, value V) error {
-	c.clearLocalNegative(key)
 	return c.cache.Set(ctx, key, value)
 }
 
 func (c *PullThroughCache[K, V]) SetWithTTL(ctx context.Context, key K, value V, ttl time.Duration) error {
-	c.clearLocalNegative(key)
 	return c.cache.SetWithTTL(ctx, key, value, ttl)
 }
 
 func (c *PullThroughCache[K, V]) Invalidate(ctx context.Context, key K) error {
-	c.clearLocalNegative(key)
 	return c.cache.Invalidate(ctx, key)
 }
 
 func (c *PullThroughCache[K, V]) InvalidateAll(ctx context.Context) error {
-	c.negativeMu.Lock()
-	clear(c.negative)
-	c.negativeMu.Unlock()
 	return c.cache.InvalidateAll(ctx)
 }
 
@@ -195,11 +180,8 @@ func (c *PullThroughCache[K, V]) lookup(ctx context.Context, key K) (V, lookupSt
 	if err := ctx.Err(); err != nil {
 		return zero, lookupMissing, err
 	}
-	if c.isLocalNegative(key) {
-		return zero, lookupNegative, nil
-	}
-	if access, ok := c.cache.(entryAccess[K, V]); ok {
-		entry, present, err := access.getEntry(ctx, key)
+	if access, ok := c.cache.(EntryCache[K, V]); ok {
+		entry, present, err := access.GetEntry(ctx, key)
 		if err != nil {
 			if c.config.strictCacheGet {
 				return zero, lookupMissing, err
@@ -257,29 +239,10 @@ func (c *PullThroughCache[K, V]) load(ctx context.Context, key K) (V, bool, erro
 		}
 	}
 
-	stopRenewal := func() {}
-	if lease != nil {
-		stopRenewal = c.startRenewal(ctx, lease)
+	if lease == nil {
+		return c.loadAndStore(ctx, key)
 	}
-	value, found, loadErr := c.callLoader(ctx, key)
-	stopRenewal()
-	if lease != nil {
-		loadErr = errors.Join(loadErr, c.release(ctx, lease))
-	}
-	if loadErr != nil {
-		var zero V
-		return zero, false, loadErr
-	}
-	if found {
-		if err := c.cache.Set(ctx, key, value); err != nil {
-			return value, true, err
-		}
-		return value, true, nil
-	}
-	if err := c.storeNegative(ctx, key); err != nil {
-		return value, false, err
-	}
-	return value, false, nil
+	return c.loadAndStoreWithLease(ctx, key, lease)
 }
 
 func (c *PullThroughCache[K, V]) acquire(ctx context.Context, key K) (Lease, V, bool, bool, error) {
@@ -331,63 +294,154 @@ func (c *PullThroughCache[K, V]) callLoader(ctx context.Context, key K) (value V
 	return c.loader(ctx, key)
 }
 
+func (c *PullThroughCache[K, V]) loadAndStore(ctx context.Context, key K) (V, bool, error) {
+	value, found, err := c.callLoader(ctx, key)
+	if err != nil {
+		var zero V
+		return zero, false, err
+	}
+	if err := c.storeLoaded(ctx, key, value, found); err != nil {
+		return value, found, err
+	}
+	return value, found, nil
+}
+
+func (c *PullThroughCache[K, V]) loadAndStoreWithLease(ctx context.Context, key K, lease Lease) (V, bool, error) {
+	loadCtx, cancelLoad := context.WithCancel(ctx)
+	guard := c.guardLease(ctx, lease, cancelLoad)
+	value, found, loadErr := c.callLoader(loadCtx, key)
+
+	lossErr := guard.Err()
+	var storeErr error
+	if loadErr == nil && lossErr == nil {
+		storeErr = c.storeLoaded(loadCtx, key, value, found)
+		lossErr = guard.Err()
+	}
+	lossErr = errors.Join(lossErr, guard.Stop())
+	cancelLoad()
+	releaseErr := c.release(ctx, lease)
+
+	if lossErr != nil {
+		var zero V
+		return zero, false, errors.Join(ErrFillLeaseLost, lossErr, loadErr, releaseErr)
+	}
+	if err := errors.Join(loadErr, storeErr, releaseErr); err != nil {
+		return value, found, err
+	}
+	return value, found, nil
+}
+
+func (c *PullThroughCache[K, V]) storeLoaded(ctx context.Context, key K, value V, found bool) error {
+	if found {
+		return c.cache.Set(ctx, key, value)
+	}
+	return c.storeNegative(ctx, key)
+}
+
 func (c *PullThroughCache[K, V]) storeNegative(ctx context.Context, key K) error {
 	expiresAt := time.Now().Add(c.config.negativeTTL)
-	if access, ok := c.cache.(entryAccess[K, V]); ok {
+	if access, ok := c.cache.(EntryCache[K, V]); ok {
 		var zero V
-		return access.setEntry(ctx, key, Entry[V]{Value: zero, Found: false, ExpiresAt: expiresAt})
+		return access.SetEntry(ctx, key, Entry[V]{Value: zero, Found: false, ExpiresAt: expiresAt})
 	}
-	c.negativeMu.Lock()
-	c.negative[key] = expiresAt
-	c.negativeMu.Unlock()
 	return nil
 }
 
-func (c *PullThroughCache[K, V]) isLocalNegative(key K) bool {
-	c.negativeMu.Lock()
-	defer c.negativeMu.Unlock()
-	expiresAt, ok := c.negative[key]
-	if !ok {
-		return false
-	}
-	if !expiresAt.After(time.Now()) {
-		delete(c.negative, key)
-		return false
-	}
-	return true
+type leaseGuard struct {
+	stop       chan struct{}
+	done       chan struct{}
+	loss       chan error
+	observable <-chan struct{}
+	cancel     context.CancelFunc
+	lossOnce   sync.Once
+	stopOnce   sync.Once
 }
 
-func (c *PullThroughCache[K, V]) clearLocalNegative(key K) {
-	c.negativeMu.Lock()
-	delete(c.negative, key)
-	c.negativeMu.Unlock()
+func (c *PullThroughCache[K, V]) guardLease(
+	ctx context.Context,
+	lease Lease,
+	cancel context.CancelFunc,
+) *leaseGuard {
+	guard := &leaseGuard{
+		stop:   make(chan struct{}),
+		done:   make(chan struct{}),
+		loss:   make(chan error, 1),
+		cancel: cancel,
+	}
+	if observable, ok := lease.(ObservableLease); ok {
+		guard.observable = observable.Done()
+	}
+	go guard.renew(ctx, lease, c.config.leaseTTL)
+	return guard
 }
 
-func (c *PullThroughCache[K, V]) startRenewal(ctx context.Context, lease Lease) func() {
-	renewalCtx, cancel := context.WithCancel(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer func() {
-			_ = recover()
-		}()
-		ticker := time.NewTicker(c.config.leaseTTL / 2)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-renewalCtx.Done():
-				return
-			case <-ticker.C:
-				if err := lease.Refresh(renewalCtx, c.config.leaseTTL); err != nil {
-					return
-				}
-			}
+func (g *leaseGuard) renew(ctx context.Context, lease Lease, ttl time.Duration) {
+	defer close(g.done)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			g.lose(fmt.Errorf("cache: lease refresh panicked: %v", recovered))
 		}
 	}()
-	return func() {
-		cancel()
-		<-done
+	interval := ttl / 2
+	if interval <= 0 {
+		interval = time.Nanosecond
 	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-g.observable:
+			g.lose(ErrLeaseLost)
+			return
+		case <-g.stop:
+			g.observeLoss()
+			return
+		case <-ticker.C:
+			if err := lease.Refresh(ctx, ttl); err != nil {
+				if ctx.Err() == nil {
+					g.lose(err)
+				}
+				return
+			}
+		}
+	}
+}
+
+func (g *leaseGuard) observeLoss() {
+	if g.observable == nil {
+		return
+	}
+	select {
+	case <-g.observable:
+		g.lose(ErrLeaseLost)
+	default:
+	}
+}
+
+func (g *leaseGuard) lose(err error) {
+	g.lossOnce.Do(func() {
+		g.loss <- err
+		g.cancel()
+	})
+}
+
+func (g *leaseGuard) Err() error {
+	g.observeLoss()
+	select {
+	case err := <-g.loss:
+		g.loss <- err
+		return err
+	default:
+		return nil
+	}
+}
+
+func (g *leaseGuard) Stop() error {
+	g.stopOnce.Do(func() { close(g.stop) })
+	<-g.done
+	return g.Err()
 }
 
 func (c *PullThroughCache[K, V]) release(ctx context.Context, lease Lease) error {

@@ -3,6 +3,7 @@ package cache_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,7 +17,9 @@ import (
 
 func newMemoryCache(t *testing.T) cache.Cache[string, string] {
 	t.Helper()
-	c, err := cache.New("users", time.Minute, memory.New[string, string]())
+	store := memory.New[string, string]()
+	t.Cleanup(func() { assert.NoError(t, store.Close()) })
+	c, err := cache.New("users", time.Minute, store)
 	require.NoError(t, err)
 	return c
 }
@@ -135,6 +138,92 @@ type fakeLocker struct {
 	err   error
 }
 
+type plainCache struct {
+	getCalls atomic.Int32
+}
+
+func (c *plainCache) Get(context.Context, string) (string, bool, error) {
+	c.getCalls.Add(1)
+	return "", false, nil
+}
+
+func (*plainCache) Set(context.Context, string, string) error { return nil }
+
+func (*plainCache) SetWithTTL(context.Context, string, string, time.Duration) error { return nil }
+
+func (*plainCache) Invalidate(context.Context, string) error { return nil }
+
+func (*plainCache) InvalidateAll(context.Context) error { return nil }
+
+type recordingEntryCache struct {
+	setCalls atomic.Int32
+}
+
+func (*recordingEntryCache) Get(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
+
+func (c *recordingEntryCache) Set(context.Context, string, string) error {
+	c.setCalls.Add(1)
+	return nil
+}
+
+func (c *recordingEntryCache) SetWithTTL(context.Context, string, string, time.Duration) error {
+	c.setCalls.Add(1)
+	return nil
+}
+
+func (*recordingEntryCache) Invalidate(context.Context, string) error { return nil }
+
+func (*recordingEntryCache) InvalidateAll(context.Context) error { return nil }
+
+func (*recordingEntryCache) GetEntry(context.Context, string) (cache.Entry[string], bool, error) {
+	return cache.Entry[string]{}, false, nil
+}
+
+func (c *recordingEntryCache) SetEntry(context.Context, string, cache.Entry[string]) error {
+	c.setCalls.Add(1)
+	return nil
+}
+
+type controllableLease struct {
+	lost     chan struct{}
+	releases atomic.Int32
+}
+
+func (*controllableLease) Refresh(context.Context, time.Duration) error { return nil }
+
+func (l *controllableLease) Release(context.Context) error {
+	l.releases.Add(1)
+	return nil
+}
+
+func (l *controllableLease) Done() <-chan struct{} { return l.lost }
+
+type controllableLocker struct {
+	lease cache.Lease
+}
+
+type failingRefreshLease struct {
+	once      sync.Once
+	refreshed chan struct{}
+	releases  atomic.Int32
+}
+
+func (l *failingRefreshLease) Refresh(context.Context, time.Duration) error {
+	l.once.Do(func() { close(l.refreshed) })
+	return cache.ErrLeaseLost
+}
+
+func (l *failingRefreshLease) Release(context.Context) error {
+	l.releases.Add(1)
+	return nil
+}
+
+func (l *controllableLocker) Lock(context.Context, string, string, time.Duration) (cache.Lease, error) {
+	return l.lease, nil
+}
+
 func (l *fakeLocker) Lock(context.Context, string, string, time.Duration) (cache.Lease, error) {
 	if l.err != nil {
 		return nil, l.err
@@ -163,6 +252,73 @@ func TestPullThroughRenewsAndReleasesDistributedLease(t *testing.T) {
 	assert.Equal(t, "loaded", value)
 	assert.GreaterOrEqual(t, lease.refreshes.Load(), int32(1))
 	assert.Equal(t, int32(1), lease.releases.Load())
+}
+
+func TestPullThroughDoesNotPublishFillAfterLeaseLoss(t *testing.T) {
+	base := &recordingEntryCache{}
+	lease := &controllableLease{lost: make(chan struct{})}
+	started := make(chan struct{})
+	pull, err := cache.NewPullThrough(
+		"users",
+		base,
+		func(ctx context.Context, _ string) (string, bool, error) {
+			close(started)
+			<-lease.lost
+			<-ctx.Done()
+			return "stale", true, ctx.Err()
+		},
+		cache.WithLocker[string](&controllableLocker{lease: lease}, time.Second),
+	)
+	require.NoError(t, err)
+
+	result := make(chan error, 1)
+	go func() {
+		_, _, getErr := pull.Get(context.Background(), "alice")
+		result <- getErr
+	}()
+	<-started
+	close(lease.lost)
+
+	require.ErrorIs(t, <-result, cache.ErrFillLeaseLost)
+	assert.Zero(t, base.setCalls.Load())
+	assert.Equal(t, int32(1), lease.releases.Load())
+}
+
+func TestPullThroughDoesNotPublishFillAfterRenewalFailure(t *testing.T) {
+	base := &recordingEntryCache{}
+	lease := &failingRefreshLease{refreshed: make(chan struct{})}
+	pull, err := cache.NewPullThrough(
+		"users",
+		base,
+		func(ctx context.Context, _ string) (string, bool, error) {
+			<-ctx.Done()
+			return "stale", true, ctx.Err()
+		},
+		cache.WithLocker[string](&controllableLocker{lease: lease}, 2*time.Millisecond),
+	)
+	require.NoError(t, err)
+
+	_, _, err = pull.Get(context.Background(), "alice")
+	require.ErrorIs(t, err, cache.ErrFillLeaseLost)
+	assert.Zero(t, base.setCalls.Load())
+	assert.Equal(t, int32(1), lease.releases.Load())
+}
+
+func TestPullThroughCustomCacheDoesNotRetainLocalNegativeEntries(t *testing.T) {
+	base := &plainCache{}
+	var loads atomic.Int32
+	pull, err := cache.NewPullThrough("users", base, func(context.Context, string) (string, bool, error) {
+		loads.Add(1)
+		return "", false, nil
+	})
+	require.NoError(t, err)
+
+	for range 2 {
+		_, found, getErr := pull.Get(context.Background(), "missing")
+		require.NoError(t, getErr)
+		assert.False(t, found)
+	}
+	assert.Equal(t, int32(2), loads.Load())
 }
 
 func TestPullThroughLockerFailurePolicy(t *testing.T) {

@@ -29,6 +29,7 @@ func (compatibilityStore) InvalidateAll(context.Context, string) error {
 
 var _ cache.Store[string, int] = compatibilityStore{}
 var _ cache.Cache[string, int] = (*cache.StandardCache[string, int])(nil)
+var _ cache.EntryCache[string, int] = (*cache.StandardCache[string, int])(nil)
 
 func TestExistingConstructorsRemainCallable(t *testing.T) {
 	standard, err := cache.New("compat", time.Minute, compatibilityStore{})

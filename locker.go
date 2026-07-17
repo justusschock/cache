@@ -9,6 +9,7 @@ import (
 var (
 	ErrLockNotAcquired = errors.New("cache: lock not acquired")
 	ErrLeaseLost       = errors.New("cache: lease is no longer owned")
+	ErrFillLeaseLost   = errors.New("cache: fill lease lost")
 )
 
 // Locker coordinates cache fills for one namespaced key.
@@ -20,4 +21,9 @@ type Locker[K comparable] interface {
 type Lease interface {
 	Refresh(context.Context, time.Duration) error
 	Release(context.Context) error
+}
+
+type ObservableLease interface {
+	Lease
+	Done() <-chan struct{}
 }

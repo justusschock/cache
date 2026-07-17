@@ -22,6 +22,12 @@ type Cache[K comparable, V any] interface {
 	InvalidateAll(context.Context) error
 }
 
+type EntryCache[K comparable, V any] interface {
+	Cache[K, V]
+	GetEntry(context.Context, K) (Entry[V], bool, error)
+	SetEntry(context.Context, K, Entry[V]) error
+}
+
 // StandardCache applies namespace and TTL policy to a Store.
 type StandardCache[K comparable, V any] struct {
 	namespace  string
@@ -45,7 +51,7 @@ func New[K comparable, V any](namespace string, defaultTTL time.Duration, store 
 
 func (c *StandardCache[K, V]) Get(ctx context.Context, key K) (V, bool, error) {
 	var zero V
-	entry, present, err := c.getEntry(ctx, key)
+	entry, present, err := c.GetEntry(ctx, key)
 	if err != nil {
 		return zero, false, err
 	}
@@ -93,7 +99,7 @@ func (c *StandardCache[K, V]) InvalidateAll(ctx context.Context) error {
 	return nil
 }
 
-func (c *StandardCache[K, V]) getEntry(ctx context.Context, key K) (Entry[V], bool, error) {
+func (c *StandardCache[K, V]) GetEntry(ctx context.Context, key K) (Entry[V], bool, error) {
 	var zero Entry[V]
 	if err := ctx.Err(); err != nil {
 		return zero, false, err
@@ -108,7 +114,7 @@ func (c *StandardCache[K, V]) getEntry(ctx context.Context, key K) (Entry[V], bo
 	return entry, true, nil
 }
 
-func (c *StandardCache[K, V]) setEntry(ctx context.Context, key K, entry Entry[V]) error {
+func (c *StandardCache[K, V]) SetEntry(ctx context.Context, key K, entry Entry[V]) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
