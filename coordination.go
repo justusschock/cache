@@ -58,7 +58,7 @@ func (l *CoordinationLocker[K]) Lock(
 		Key:   fillKey,
 		Owner: l.owner,
 		TTL:   ttl,
-		Wait:  false,
+		Wait:  true,
 	})
 	if err != nil {
 		return nil, mapCoordinationError(err)
