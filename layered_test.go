@@ -242,6 +242,29 @@ func TestLayeredReadCanFailOpenOrStrict(t *testing.T) {
 	assert.ErrorIs(t, err, fastErr)
 }
 
+func TestLayeredTreatsTypedNilOptionalObserverAsAbsent(t *testing.T) {
+	log := &layerLog{}
+	fast := newLayerStore("fast", log)
+	fast.getErr = errors.New("fast unavailable")
+	slow := newLayerStore("slow", log)
+	slow.entries["alice"] = cache.Entry[string]{Value: "value", Found: true, ExpiresAt: time.Now().Add(time.Minute)}
+	var observer *eventRecorder
+	layered, err := cache.NewLayered(
+		[]cache.Store[string, string]{fast, slow},
+		cache.WithLayerObserver(observer),
+	)
+	require.NoError(t, err)
+
+	var entry cache.Entry[string]
+	var present bool
+	assert.NotPanics(t, func() {
+		entry, present, err = layered.Get(context.Background(), "users", "alice")
+	})
+	require.NoError(t, err)
+	assert.True(t, present)
+	assert.Equal(t, "value", entry.Value)
+}
+
 func TestLayeredInvalidationAttemptsEveryLayerAndJoinsErrors(t *testing.T) {
 	log := &layerLog{}
 	fast := newLayerStore("fast", log)

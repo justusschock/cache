@@ -41,3 +41,15 @@ func TestDecodeAcceptsVersionOneEntry(t *testing.T) {
 	assert.Equal(t, expiresAt, decoded.ExpiresAt)
 	assert.Equal(t, 42, decoded.Value)
 }
+
+func TestDecodeRejectsMalformedVersionTwoNanoseconds(t *testing.T) {
+	encoder := New(cache.DefaultCodec[string](), cache.DefaultCodec[int]())
+	for _, nanoseconds := range []uint32{uint32(time.Second), ^uint32(0)} {
+		envelope := make([]byte, headerSize2)
+		envelope[0] = version2
+		binary.BigEndian.PutUint32(envelope[17:21], nanoseconds)
+
+		_, _, err := encoder.Decode(envelope)
+		assert.ErrorIs(t, err, ErrInvalidEnvelope)
+	}
+}

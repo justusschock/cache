@@ -19,6 +19,13 @@ func RunInvalidationBusContract[K comparable](
 	t.Helper()
 	subscriber := newBus(t)
 	publisher := newBus(t)
+	nilHandlerCtx, cancelNilHandler := context.WithCancel(context.Background())
+	cancelNilHandler()
+	assert.ErrorIs(
+		t,
+		subscriber.Subscribe(nilHandlerCtx, event.Namespace, nil),
+		cache.ErrNilInvalidationHandler,
+	)
 	ctx, cancel := context.WithCancel(context.Background())
 	listenerResult := make(chan error, 1)
 	received := make(chan cache.InvalidationEvent[K], 2)
