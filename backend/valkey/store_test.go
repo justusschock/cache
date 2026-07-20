@@ -46,7 +46,6 @@ func (*nilClient) DoMultiStream(context.Context, ...valkeyclient.Completed) valk
 func (*nilClient) Dedicated(func(valkeyclient.DedicatedClient) error) error { return nil }
 func (*nilClient) Dedicate() (valkeyclient.DedicatedClient, func())         { return nil, func() {} }
 func (*nilClient) Nodes() map[string]valkeyclient.Client                    { return nil }
-func (*nilClient) Mode() valkeyclient.ClientMode                            { return "" }
 
 func TestNewRejectsNilClientAndCodecs(t *testing.T) {
 	_, err := valkeycache.New[string, int](nil)
