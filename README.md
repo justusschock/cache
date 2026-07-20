@@ -2,7 +2,7 @@
 
 `go-cache` provides typed, composable caches for Go: bounded in-process storage, layered promotion, pull-through loading, negative entries, renewable fill leases, and transport-neutral invalidation.
 
-The repository is private and requires Go 1.26 or newer. Cache data is assumed to be reconstructible and disposable; correctness-critical state belongs in a durable system of record.
+The repository is private and requires Go 1.22 or newer. Cache data is assumed to be reconstructible and disposable; correctness-critical state belongs in a durable system of record.
 
 ## Installation
 
@@ -11,10 +11,10 @@ Configure private-module access and authenticate GitHub through your normal Git 
 ```bash
 go env -w GOPRIVATE='github.com/justusschock/*'
 go env -w GONOSUMDB='github.com/justusschock/*'
-go get github.com/justusschock/go-cache@v0.1.0
+go get github.com/justusschock/go-cache@v0.2.0
 ```
 
-The root module depends on the tagged `go-concurrency`, `go-messaging`, and `go-distributed-coordination` modules. Database and remote-cache clients are isolated in separately versioned nested modules, so they do not enter the root dependency graph.
+The module depends on `go-concurrency`, `go-messaging`, and `go-distributed-coordination` at the matching `v0.2.0` compatibility line. All backend packages share this module and release, so one repository tag versions the complete library. Remote-client dependencies appear in the module graph, but Go compiles only packages imported by an application.
 
 ## Basic use
 
@@ -198,11 +198,11 @@ Key identity depends on the backend. The memory backend uses Go `==` for `K`; se
 
 Values are not deep-copied by the root API. The memory backend stores and returns reference-bearing values such as pointers, maps, and slices by reference, so callers must treat cached values as immutable, clone them at the application boundary, or provide their own synchronization. Serialized backends normally return newly decoded values, but that is a codec property rather than a `Cache` guarantee.
 
-## Optional backend modules
+## Optional backend packages
 
-Install only the backend needed by an application. Every nested module requires its matching `backend/<name>/v0.1.0` repository tag.
+Import only the backend needed by an application. Every backend package is included in the root `v0.2.0` module release.
 
-| Module | Store | Locker | Invalidation bus |
+| Package | Store | Locker | Invalidation bus |
 | --- | --- | --- | --- |
 | `backend/disk` (bbolt) | yes | no | no |
 | `backend/postgres` | yes | yes | yes |
@@ -212,11 +212,7 @@ Install only the backend needed by an application. Every nested module requires 
 | `backend/memcached` | yes | yes | no |
 | `backend/hazelcast` | yes | no | yes |
 
-For example:
-
-```bash
-go get github.com/justusschock/go-cache/backend/redis@v0.1.0
-```
+For example, import `github.com/justusschock/go-cache/backend/redis` after installing the root module.
 
 Remote clients and connection pools remain caller-owned; stores, lockers, and invalidation buses never close them. The bbolt store owns its file handle and must be closed. PostgreSQL requires an explicit idempotent `Migrate` call and uses the server clock for entry and lease expiration decisions. Its `DeleteExpired` operation physically removes expired entry and lock rows and returns their combined count.
 
@@ -242,29 +238,18 @@ This module does not provide:
 
 ## Development
 
-The root and heavyweight backends are separate Go modules. Before the first release tag exists, create an ignored workspace for local cross-module testing:
+The root and all backend packages form one Go module. Run the same repository-wide verification as CI with workspace discovery disabled:
 
 ```bash
-go work init .
-go work use backend/disk backend/postgres backend/redis backend/valkey
-go work use backend/dragonfly backend/memcached backend/hazelcast
-go work edit -go=1.26
-go work edit -replace=github.com/justusschock/go-cache@v0.1.0=.
-go work edit -replace=github.com/justusschock/go-cache/backend/redis@v0.1.0=./backend/redis
-```
-
-Run the same verification matrix as CI:
-
-```bash
-for module in . backend/disk backend/postgres backend/redis backend/valkey backend/dragonfly backend/memcached backend/hazelcast; do
-  (cd "$module" && go test -race ./... && go vet ./...) || exit 1
-done
+GOWORK=off go mod verify
+GOWORK=off go test -race ./...
+GOWORK=off go vet ./...
 pre-commit run --all-files
 ```
 
-Integration CI runs the same race-enabled checks against Redis, Dragonfly, Valkey, Memcached, Hazelcast, and PostgreSQL. Tag builds additionally disable workspaces with `GOWORK=off` and verify the tagged module against its released dependencies. Publish dependency tags before dependents: root first, then Redis, then the other backend modules.
+GitHub Actions runs the complete unit, race, vet, formatting, assertion-policy, and module-verification gates on Go 1.22.x, 1.23.x, 1.24.x, 1.25.x, and 1.26.x. Integration CI retains race-enabled checks against Redis, Dragonfly, Valkey, Memcached, Hazelcast, and PostgreSQL. Tag builds additionally use `GOWORK=off` and verify the single released module. The repository publishes one annotated release tag, `v0.2.0`.
 
-CI private-module access uses a GitHub App installation token before `setup-go` or any Go dependency command. Configure repository variable `GO_MODULES_APP_CLIENT_ID` and secret `GO_MODULES_APP_PRIVATE_KEY`; the workflow fails explicitly when either is absent. The token is limited to read-only contents access for the currently required repositories: `go-cache`, `go-concurrency`, `go-distributed-coordination`, and `go-messaging`. Add a repository to that explicit list when the module graph gains another private dependency. The runner sets `GOPRIVATE` and `GONOSUMDB` for `github.com/justusschock/*` and installs an ephemeral authenticated Git URL rewrite; it does not change developer credential configuration.
+CI private-module access uses the repository secret `GO_MODULES_TOKEN` before `setup-go` or any Go dependency command. The workflow fails explicitly when the secret is absent, passes it only through a masked environment variable, and never prints it. The runner sets `GOPRIVATE` and `GONOSUMDB` for `github.com/justusschock/*` and installs an ephemeral authenticated Git URL rewrite; it does not change developer credential configuration.
 
 Local implementation plans under `docs/` and local workspaces are intentionally ignored by Git.
 
