@@ -18,18 +18,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module:
-          - .
-          - backend/disk
-          - backend/postgres
-          - backend/redis
-          - backend/valkey
-          - backend/dragonfly
-          - backend/memcached
-          - backend/hazelcast
-    defaults:
-      run:
-        working-directory: ${{ matrix.module }}
+        go:
+          - "1.22.x"
+          - "1.23.x"
+          - "1.24.x"
+          - "1.25.x"
+          - "1.26.x"
     steps:
       - uses: actions/checkout@v5
         with:
@@ -37,34 +31,16 @@ jobs:
       - name: Require private module credentials
         shell: bash
         env:
-          CLIENT_ID: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
-          PRIVATE_KEY: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
+          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
         run: |
-          if [[ -z "$CLIENT_ID" ]]; then
-            echo "::error title=Missing GitHub Actions variable::GO_MODULES_APP_CLIENT_ID is required for private Go modules"
+          if [[ -z "$GO_MODULES_TOKEN" ]]; then
+            echo "::error title=Missing GitHub Actions secret::GO_MODULES_TOKEN is required for private Go modules"
             exit 1
           fi
-          if [[ -z "$PRIVATE_KEY" ]]; then
-            echo "::error title=Missing GitHub Actions secret::GO_MODULES_APP_PRIVATE_KEY is required for private Go modules"
-            exit 1
-          fi
-      - name: Mint private module token
-        id: go-modules-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
-        with:
-          client-id: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
-          private-key: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
-          owner: justusschock
-          repositories: |
-            go-cache
-            go-concurrency
-            go-distributed-coordination
-            go-messaging
-          permission-contents: read
       - name: Authenticate private module Git access
         shell: bash
         env:
-          GO_MODULES_TOKEN: ${{ steps.go-modules-token.outputs.token }}
+          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
         run: |
           auth_url="https://x-access-token:${GO_MODULES_TOKEN}@github.com/"
           git config --global url."${auth_url}".insteadOf "https://github.com/"
@@ -72,18 +48,9 @@ jobs:
           git config --global --add url."${auth_url}".insteadOf "ssh://git@github.com/"
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version: ${{ matrix.go }}
           cache: true
-          cache-dependency-path: ${{ matrix.module }}/go.sum
-      - name: Prepare local module workspace
-        working-directory: ${{ github.workspace }}
-        run: |
-          go work init .
-          go work use backend/disk backend/postgres backend/redis backend/valkey
-          go work use backend/dragonfly backend/memcached backend/hazelcast
-          go work edit -go=1.26
-          go work edit -replace=github.com/justusschock/go-cache@v0.1.0=.
-          go work edit -replace=github.com/justusschock/go-cache/backend/redis@v0.1.0=./backend/redis
+          cache-dependency-path: go.sum
       - name: Check formatting
         run: |
           files="$(gofmt -l .)"
@@ -96,6 +63,7 @@ jobs:
           if grep -REn --include='*_test.go' '\bt\.(Fatal|Fatalf|Error|Errorf|Fail|FailNow)\b' .; then
             exit 1
           fi
+      - run: go mod verify
       - run: go vet ./...
       - run: go test -race ./...
 
@@ -159,34 +127,16 @@ jobs:
       - name: Require private module credentials
         shell: bash
         env:
-          CLIENT_ID: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
-          PRIVATE_KEY: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
+          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
         run: |
-          if [[ -z "$CLIENT_ID" ]]; then
-            echo "::error title=Missing GitHub Actions variable::GO_MODULES_APP_CLIENT_ID is required for private Go modules"
+          if [[ -z "$GO_MODULES_TOKEN" ]]; then
+            echo "::error title=Missing GitHub Actions secret::GO_MODULES_TOKEN is required for private Go modules"
             exit 1
           fi
-          if [[ -z "$PRIVATE_KEY" ]]; then
-            echo "::error title=Missing GitHub Actions secret::GO_MODULES_APP_PRIVATE_KEY is required for private Go modules"
-            exit 1
-          fi
-      - name: Mint private module token
-        id: go-modules-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
-        with:
-          client-id: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
-          private-key: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
-          owner: justusschock
-          repositories: |
-            go-cache
-            go-concurrency
-            go-distributed-coordination
-            go-messaging
-          permission-contents: read
       - name: Authenticate private module Git access
         shell: bash
         env:
-          GO_MODULES_TOKEN: ${{ steps.go-modules-token.outputs.token }}
+          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
         run: |
           auth_url="https://x-access-token:${GO_MODULES_TOKEN}@github.com/"
           git config --global url."${auth_url}".insteadOf "https://github.com/"
@@ -194,16 +144,8 @@ jobs:
           git config --global --add url."${auth_url}".insteadOf "ssh://git@github.com/"
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version: "1.26.x"
           cache: true
-      - name: Prepare local module workspace
-        run: |
-          go work init .
-          go work use backend/disk backend/postgres backend/redis backend/valkey
-          go work use backend/dragonfly backend/memcached backend/hazelcast
-          go work edit -go=1.26
-          go work edit -replace=github.com/justusschock/go-cache@v0.1.0=.
-          go work edit -replace=github.com/justusschock/go-cache/backend/redis@v0.1.0=./backend/redis
       - name: Wait for services
         run: |
           for port in 6379 6380 6381 11211 5701 5432; do
@@ -239,34 +181,16 @@ jobs:
       - name: Require private module credentials
         shell: bash
         env:
-          CLIENT_ID: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
-          PRIVATE_KEY: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
+          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
         run: |
-          if [[ -z "$CLIENT_ID" ]]; then
-            echo "::error title=Missing GitHub Actions variable::GO_MODULES_APP_CLIENT_ID is required for private Go modules"
+          if [[ -z "$GO_MODULES_TOKEN" ]]; then
+            echo "::error title=Missing GitHub Actions secret::GO_MODULES_TOKEN is required for private Go modules"
             exit 1
           fi
-          if [[ -z "$PRIVATE_KEY" ]]; then
-            echo "::error title=Missing GitHub Actions secret::GO_MODULES_APP_PRIVATE_KEY is required for private Go modules"
-            exit 1
-          fi
-      - name: Mint private module token
-        id: go-modules-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3
-        with:
-          client-id: ${{ vars.GO_MODULES_APP_CLIENT_ID }}
-          private-key: ${{ secrets.GO_MODULES_APP_PRIVATE_KEY }}
-          owner: justusschock
-          repositories: |
-            go-cache
-            go-concurrency
-            go-distributed-coordination
-            go-messaging
-          permission-contents: read
       - name: Authenticate private module Git access
         shell: bash
         env:
-          GO_MODULES_TOKEN: ${{ steps.go-modules-token.outputs.token }}
+          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
         run: |
           auth_url="https://x-access-token:${GO_MODULES_TOKEN}@github.com/"
           git config --global url."${auth_url}".insteadOf "https://github.com/"
@@ -274,21 +198,9 @@ jobs:
           git config --global --add url."${auth_url}".insteadOf "ssh://git@github.com/"
       - uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version: "1.26.x"
           cache: true
-      - name: Select tagged module
-        id: module
-        shell: bash
-        run: |
-          if [[ "$GITHUB_REF_NAME" == v* ]]; then
-            module="."
-          else
-            module="${GITHUB_REF_NAME%/v*}"
-          fi
-          test -f "$module/go.mod"
-          echo "path=$module" >> "$GITHUB_OUTPUT"
       - name: Verify released dependency graph without a workspace
-        working-directory: ${{ steps.module.outputs.path }}
         env:
           GOWORK: "off"
         run: |
