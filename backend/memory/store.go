@@ -85,21 +85,8 @@ func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.E
 	if err := ctx.Err(); err != nil {
 		return zero, false, err
 	}
-
-	state, ok := s.namespaces[namespace]
-	if !ok {
-		return zero, false, nil
-	}
-	record, ok := state.entries[key]
-	if !ok {
-		return zero, false, nil
-	}
-	if record.generation != state.generation || !record.entry.ExpiresAt.After(time.Now()) {
-		s.remove(namespace, state, key, record)
-		return zero, false, nil
-	}
-	s.lru.MoveToFront(record.element)
-	return record.entry, true, nil
+	entry, present := s.getLocked(namespace, key, time.Now())
+	return entry, present, nil
 }
 
 func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry cache.Entry[V]) error {
@@ -112,23 +99,7 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	state := s.namespace(namespace)
-	if existing, ok := state.entries[key]; ok {
-		existing.entry = entry
-		existing.generation = state.generation
-		state.entries[key] = existing
-		s.lru.MoveToFront(existing.element)
-	} else {
-		element := s.lru.PushFront(itemKey[K]{namespace: namespace, key: key})
-		state.entries[key] = record[K, V]{
-			entry:      entry,
-			generation: state.generation,
-			element:    element,
-		}
-	}
-	for s.lru.Len() > s.maxEntries {
-		s.evictOldest()
-	}
+	s.setLocked(namespace, key, entry)
 	return nil
 }
 
@@ -142,11 +113,7 @@ func (s *Store[K, V]) Invalidate(ctx context.Context, namespace string, key K) e
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if state, ok := s.namespaces[namespace]; ok {
-		if record, present := state.entries[key]; present {
-			s.remove(namespace, state, key, record)
-		}
-	}
+	s.invalidateLocked(namespace, key)
 	return nil
 }
 
@@ -170,6 +137,65 @@ func (s *Store[K, V]) InvalidateAll(ctx context.Context, namespace string) error
 	return nil
 }
 
+// GetMany looks up keys under one lock acquisition. Results are aligned with keys.
+func (s *Store[K, V]) GetMany(ctx context.Context, namespace string, keys []K) ([]cache.Entry[V], []bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	entries := make([]cache.Entry[V], len(keys))
+	present := make([]bool, len(keys))
+	now := time.Now()
+	for index, key := range keys {
+		entries[index], present[index] = s.getLocked(namespace, key, now)
+	}
+	return entries, present, nil
+}
+
+// SetMany stores entries[i] under keys[i] under one lock acquisition, so no
+// other store operation observes a partially applied batch. Capacity eviction
+// still applies to the resulting entries.
+func (s *Store[K, V]) SetMany(ctx context.Context, namespace string, keys []K, entries []cache.Entry[V]) error {
+	if len(keys) != len(entries) {
+		return cache.ErrBatchLength
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for index, key := range keys {
+		s.setLocked(namespace, key, entries[index])
+	}
+	return nil
+}
+
+// InvalidateMany removes keys under one lock acquisition.
+func (s *Store[K, V]) InvalidateMany(ctx context.Context, namespace string, keys []K) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, key := range keys {
+		s.invalidateLocked(namespace, key)
+	}
+	return nil
+}
+
 func (s *Store[K, V]) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -180,6 +206,52 @@ func (s *Store[K, V]) Close() error {
 	s.closeOnce.Do(func() { close(s.stop) })
 	<-s.done
 	return nil
+}
+
+func (s *Store[K, V]) getLocked(namespace string, key K, now time.Time) (cache.Entry[V], bool) {
+	var zero cache.Entry[V]
+	state, ok := s.namespaces[namespace]
+	if !ok {
+		return zero, false
+	}
+	record, ok := state.entries[key]
+	if !ok {
+		return zero, false
+	}
+	if record.generation != state.generation || record.entry.Expired(now) {
+		s.remove(namespace, state, key, record)
+		return zero, false
+	}
+	s.lru.MoveToFront(record.element)
+	return record.entry, true
+}
+
+func (s *Store[K, V]) setLocked(namespace string, key K, entry cache.Entry[V]) {
+	state := s.namespace(namespace)
+	if existing, ok := state.entries[key]; ok {
+		existing.entry = entry
+		existing.generation = state.generation
+		state.entries[key] = existing
+		s.lru.MoveToFront(existing.element)
+	} else {
+		element := s.lru.PushFront(itemKey[K]{namespace: namespace, key: key})
+		state.entries[key] = record[K, V]{
+			entry:      entry,
+			generation: state.generation,
+			element:    element,
+		}
+	}
+	for s.lru.Len() > s.maxEntries {
+		s.evictOldest()
+	}
+}
+
+func (s *Store[K, V]) invalidateLocked(namespace string, key K) {
+	if state, ok := s.namespaces[namespace]; ok {
+		if record, present := state.entries[key]; present {
+			s.remove(namespace, state, key, record)
+		}
+	}
 }
 
 func (s *Store[K, V]) namespace(namespace string) *namespaceState[K, V] {
@@ -237,7 +309,7 @@ func (s *Store[K, V]) removeExpired(now time.Time) {
 	defer s.mu.Unlock()
 	for namespace, state := range s.namespaces {
 		for key, record := range state.entries {
-			if record.generation != state.generation || !record.entry.ExpiresAt.After(now) {
+			if record.generation != state.generation || record.entry.Expired(now) {
 				s.remove(namespace, state, key, record)
 			}
 		}

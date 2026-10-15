@@ -68,7 +68,10 @@ func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, ha
 		return cache.ErrNilInvalidationHandler
 	}
 	pubsub := b.client.Subscribe(ctx, invalidationChannel(namespace))
-	defer pubsub.Close()
+	defer func() {
+		// Subscribe already reports why it returned; a close failure adds nothing actionable.
+		_ = pubsub.Close()
+	}()
 	if _, err := pubsub.Receive(ctx); err != nil {
 		return fmt.Errorf("cache redis subscribe invalidation: %w", err)
 	}

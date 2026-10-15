@@ -58,3 +58,34 @@ func TestInvalidationBusFiltersMismatchedNamespacePayloads(t *testing.T) {
 		}
 	}
 }
+
+func TestNoExpiryEntriesHaveNoNativeTTL(t *testing.T) {
+	address := os.Getenv("REDIS_ADDR")
+	if address == "" {
+		address = "127.0.0.1:6379"
+	}
+	client := goredis.NewClient(&goredis.Options{Addr: address})
+	t.Cleanup(func() { assert.NoError(t, client.Close()) })
+	store, err := New[string, int](client)
+	require.NoError(t, err)
+	ctx := context.Background()
+	namespace := t.Name()
+
+	require.NoError(t, store.Set(ctx, namespace, "single", cache.Entry[int]{Value: 1, Found: true}))
+	require.NoError(t, store.SetMany(ctx, namespace, []string{"batch", "expiring"}, []cache.Entry[int]{
+		{Value: 2, Found: true},
+		{Value: 3, Found: true, ExpiresAt: time.Now().Add(time.Hour)},
+	}))
+	for key, persistent := range map[string]bool{"single": true, "batch": true, "expiring": false} {
+		entryKey, _, err := store.keys(namespace, key)
+		require.NoError(t, err)
+		ttl, err := client.PTTL(ctx, entryKey).Result()
+		require.NoError(t, err)
+		if persistent {
+			assert.Equal(t, time.Duration(-1), ttl, key)
+		} else {
+			assert.Positive(t, ttl, key)
+		}
+		require.NoError(t, client.Del(ctx, entryKey).Err())
+	}
+}

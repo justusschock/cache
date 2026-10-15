@@ -95,7 +95,7 @@ func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.E
 	if err != nil {
 		return zero, false, fmt.Errorf("cache redis decode: %w", err)
 	}
-	if recordGeneration != generation || !entry.ExpiresAt.After(time.Now()) {
+	if recordGeneration != generation || entry.Expired(time.Now()) {
 		return zero, false, nil
 	}
 	return entry, true, nil
@@ -109,8 +109,8 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 	if err != nil {
 		return err
 	}
-	ttl := time.Until(entry.ExpiresAt)
-	if ttl <= 0 {
+	ttl, live := redisTTL(entry)
+	if !live {
 		return s.Invalidate(ctx, namespace, key)
 	}
 	generation, err := s.generation(ctx, generationKey)
@@ -150,6 +150,143 @@ func (s *Store[K, V]) InvalidateAll(ctx context.Context, namespace string) error
 		return fmt.Errorf("cache redis invalidate all: %w", err)
 	}
 	return nil
+}
+
+// GetMany reads keys and the namespace generation in one pipeline round trip.
+// Results are aligned with keys.
+func (s *Store[K, V]) GetMany(ctx context.Context, namespace string, keys []K) ([]cache.Entry[V], []bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	entries := make([]cache.Entry[V], len(keys))
+	present := make([]bool, len(keys))
+	if len(keys) == 0 {
+		return entries, present, nil
+	}
+	entryKeys, err := s.entryKeys(namespace, keys)
+	if err != nil {
+		return nil, nil, err
+	}
+	pipeline := s.client.Pipeline()
+	commands := make([]*goredis.StringCmd, len(entryKeys))
+	for index, entryKey := range entryKeys {
+		commands[index] = pipeline.Get(ctx, entryKey)
+	}
+	generationCommand := pipeline.Get(ctx, redisGenerationKey(namespace))
+	if _, err := pipeline.Exec(ctx); err != nil && !errors.Is(err, goredis.Nil) {
+		return nil, nil, fmt.Errorf("cache redis get many: %w", err)
+	}
+	generation, err := generationCommand.Uint64()
+	if errors.Is(err, goredis.Nil) {
+		generation, err = 0, nil
+	}
+	if err != nil {
+		return nil, nil, fmt.Errorf("cache redis generation: %w", err)
+	}
+	now := time.Now()
+	for index, command := range commands {
+		envelope, err := command.Bytes()
+		if errors.Is(err, goredis.Nil) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("cache redis get many: %w", err)
+		}
+		entry, recordGeneration, err := s.encoder.Decode(envelope)
+		if err != nil {
+			return nil, nil, fmt.Errorf("cache redis decode: %w", err)
+		}
+		if recordGeneration != generation || entry.Expired(now) {
+			continue
+		}
+		entries[index], present[index] = entry, true
+	}
+	return entries, present, nil
+}
+
+// SetMany writes entries in one pipeline round trip after reading the
+// namespace generation. Already expired entries are deleted instead. The
+// pipeline is not a transaction, so a failed call may leave part of the batch
+// applied.
+func (s *Store[K, V]) SetMany(ctx context.Context, namespace string, keys []K, entries []cache.Entry[V]) error {
+	if len(keys) != len(entries) {
+		return cache.ErrBatchLength
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	entryKeys, err := s.entryKeys(namespace, keys)
+	if err != nil {
+		return err
+	}
+	generation, err := s.generation(ctx, redisGenerationKey(namespace))
+	if err != nil {
+		return err
+	}
+	pipeline := s.client.Pipeline()
+	for index, entryKey := range entryKeys {
+		ttl, live := redisTTL(entries[index])
+		if !live {
+			pipeline.Del(ctx, entryKey)
+			continue
+		}
+		envelope, err := s.encoder.Encode(entries[index], generation)
+		if err != nil {
+			return err
+		}
+		pipeline.Set(ctx, entryKey, envelope, ttl)
+	}
+	if _, err := pipeline.Exec(ctx); err != nil {
+		return fmt.Errorf("cache redis set many: %w", err)
+	}
+	return nil
+}
+
+// InvalidateMany deletes keys in one pipeline round trip.
+func (s *Store[K, V]) InvalidateMany(ctx context.Context, namespace string, keys []K) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	entryKeys, err := s.entryKeys(namespace, keys)
+	if err != nil {
+		return err
+	}
+	pipeline := s.client.Pipeline()
+	for _, entryKey := range entryKeys {
+		pipeline.Del(ctx, entryKey)
+	}
+	if _, err := pipeline.Exec(ctx); err != nil {
+		return fmt.Errorf("cache redis invalidate many: %w", err)
+	}
+	return nil
+}
+
+func (s *Store[K, V]) entryKeys(namespace string, keys []K) ([]string, error) {
+	entryKeys := make([]string, len(keys))
+	for index, key := range keys {
+		entryKey, _, err := s.keys(namespace, key)
+		if err != nil {
+			return nil, err
+		}
+		entryKeys[index] = entryKey
+	}
+	return entryKeys, nil
+}
+
+// redisTTL returns the native TTL for entry, where zero means no expiration,
+// and whether the entry is still live.
+func redisTTL[V any](entry cache.Entry[V]) (time.Duration, bool) {
+	if entry.NeverExpires() {
+		return 0, true
+	}
+	ttl := time.Until(entry.ExpiresAt)
+	return ttl, ttl > 0
 }
 
 func (s *Store[K, V]) keys(namespace string, key K) (string, string, error) {

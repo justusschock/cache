@@ -1,6 +1,6 @@
 module github.com/justusschock/go-cache
 
-go 1.22.0
+go 1.25.0
 
 require (
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c

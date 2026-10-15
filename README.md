@@ -2,7 +2,7 @@
 
 `go-cache` provides typed, composable caches for Go: bounded in-process storage, layered promotion, pull-through loading, negative entries, renewable fill leases, and transport-neutral invalidation.
 
-The repository is private and requires Go 1.22 or newer. Cache data is assumed to be reconstructible and disposable; correctness-critical state belongs in a durable system of record.
+The repository is private and requires Go 1.25 or newer. Cache data is assumed to be reconstructible and disposable; correctness-critical state belongs in a durable system of record.
 
 ## Installation
 
@@ -11,7 +11,7 @@ Configure private-module access and authenticate GitHub through your normal Git 
 ```bash
 go env -w GOPRIVATE='github.com/justusschock/*'
 go env -w GONOSUMDB='github.com/justusschock/*'
-go get github.com/justusschock/go-cache@v0.2.0
+go get github.com/justusschock/go-cache@v0.3.0
 ```
 
 The module depends on `go-concurrency`, `go-messaging`, and `go-distributed-coordination` at the matching `v0.2.0` compatibility line. All backend packages share this module and release, so one repository tag versions the complete library. Remote-client dependencies appear in the module graph, but Go compiles only packages imported by an application.
@@ -66,6 +66,44 @@ defer store.Close()
 ```
 
 The store uses a global least-recently-used order across namespaces. Reads refresh recency, expiration and invalidation remove entries from the order, and `Close` is idempotent. Every memory store must be closed: construction starts an expiration-sweeper goroutine, and omitting `Close` leaves that goroutine running for the lifetime of the process.
+
+## Entries without expiration
+
+TTLs must be positive, with one explicit opt-in: `cache.NoExpiry`. Passing it to `New` makes `Set` and `SetMany` write entries that never expire; passing it to `SetWithTTL` or `SetManyWithTTL` does the same for individual writes on an otherwise expiring cache. Any other zero or negative TTL is still rejected with `ErrInvalidTTL`.
+
+```go
+hashes, err := cache.New("file-hashes", cache.NoExpiry, store)
+if err != nil {
+	return err
+}
+err = hashes.Set(ctx, "src/main.go", digest)
+
+// Or keep a default TTL and opt out per write:
+err = sessions.SetWithTTL(ctx, "pinned", session, cache.NoExpiry)
+```
+
+A no-expiry entry carries a zero `Entry.ExpiresAt`; `Entry.NeverExpires` and `Entry.Expired(now)` encode that rule. Every backend keeps such entries until they are invalidated, replaced, or evicted by the backend's own capacity policy: memory never sweeps them, Redis, Valkey, Dragonfly, and Hazelcast write them without a native TTL, Memcached uses expiration `0`, and PostgreSQL stores `expires_at = 'infinity'`. `SetEntry` accepts a zero `ExpiresAt` so entries read through `GetEntry` can be written back unchanged.
+
+## Batch operations
+
+`StandardCache` implements `BatchCache`, which adds `GetMany`, `SetMany`, `SetManyWithTTL`, and `InvalidateMany`. Results are aligned with the key slice, value slices must have the same length (`ErrBatchLength` otherwise), and a later duplicate key wins.
+
+```go
+paths := []string{"src/a.go", "src/b.go", "src/c.go"}
+digests, found, err := hashes.GetMany(ctx, paths)
+if err != nil {
+	return err
+}
+for index, path := range paths {
+	if !found[index] {
+		// compute and collect the missing digest
+	}
+	_ = digests[index]
+}
+err = hashes.SetMany(ctx, changedPaths, changedDigests)
+```
+
+When the underlying store implements the optional `BatchStore` interface, each batch call becomes one store call; otherwise the cache falls back to one `Get`, `Set`, or `Invalidate` per key and stops at the first error. The disk store runs every batch in a single bbolt transaction, which applies the batch atomically and costs one commit instead of one per key. The memory store applies a batch under one lock acquisition. Redis, Dragonfly, and Valkey pipeline a batch into one round trip; those pipelines are not transactions, so a failed call can leave part of a batch applied. Other stores use the fallback.
 
 ## Layered caches
 
@@ -186,9 +224,9 @@ go func() {
 
 ## Store and adapter contracts
 
-`Store[K,V]` persists `Entry[V]` values under a string namespace. A returned `present` flag distinguishes an absent record from a stored negative entry. Stores must hide logically expired records, isolate namespaces, make missing-key invalidation idempotent, and honor canceled contexts.
+`Store[K,V]` persists `Entry[V]` values under a string namespace. A returned `present` flag distinguishes an absent record from a stored negative entry. A zero `ExpiresAt` means the entry never expires. Stores must hide logically expired records, never expire or attach a native TTL to zero-expiration entries, isolate namespaces, make missing-key invalidation idempotent, and honor canceled contexts.
 
-`StandardCache` owns namespace and TTL policy. It exposes ordinary value operations through `Cache` and entry-aware operations through `EntryCache`. `SetEntry` rejects entries that are already expired.
+`StandardCache` owns namespace and TTL policy. It exposes ordinary value operations through `Cache`, entry-aware operations through `EntryCache`, and multi-key operations through `BatchCache`. `SetEntry` rejects entries that are already expired; a zero `ExpiresAt` is not expired.
 
 The automatic `Codec[T]` directly encodes strings, byte slices, booleans, numeric scalars, and JSON-compatible composites. Interface values require a custom codec because their concrete decode type is ambiguous.
 
@@ -198,19 +236,46 @@ Key identity depends on the backend. The memory backend uses Go `==` for `K`; se
 
 Values are not deep-copied by the root API. The memory backend stores and returns reference-bearing values such as pointers, maps, and slices by reference, so callers must treat cached values as immutable, clone them at the application boundary, or provide their own synchronization. Serialized backends normally return newly decoded values, but that is a codec property rather than a `Cache` guarantee.
 
+## Disk prefix scans
+
+The bbolt store hashes keys by default. Open it with `disk.WithOrderedKeys` to store the key codec's bytes verbatim; bbolt then keeps entries in encoded-key byte order, which enables `ScanPrefix` and `DeletePrefix`:
+
+```go
+store, err := disk.Open[string, string](
+	filepath.Join(stateDir, "hashes.db"),
+	disk.WithOrderedKeys[string, string](),
+)
+if err != nil {
+	return err
+}
+defer store.Close()
+
+err = store.ScanPrefix(ctx, "file-hashes", []byte("src/"), func(path string, entry cache.Entry[string]) bool {
+	fmt.Println(path, entry.Value)
+	return true // false stops the scan
+})
+removed, err := store.DeletePrefix(ctx, "file-hashes", []byte("vendor/"))
+```
+
+The prefix is matched against the bytes produced by the key codec, not against `K`. With the default codec, string keys encode to their raw bytes and `[]byte` keys to themselves, so a prefix is an ordinary string prefix. Integers encode as decimal text, so they sort lexicographically rather than numerically, and composite keys encode as JSON; supply `disk.WithKeyCodec` when another ordering or a structured prefix (for example `dir + "\x00"`) is needed. An empty prefix covers the whole namespace.
+
+`ScanPrefix` visits live entries in ascending key order inside one read transaction and skips expired entries and entries from before the last `InvalidateAll`; its callback must not write to the same store. `DeletePrefix` removes all matching records in one write transaction and returns how many it removed, including logically expired ones. Without `WithOrderedKeys` both return `disk.ErrOrderedKeysRequired`. Ordered and hashed keys are separate on-disk layouts, so always reopen a file with the same choice. Encoded keys must stay below bbolt's 32 KiB key limit.
+
 ## Optional backend packages
 
-Import only the backend needed by an application. Every backend package is included in the root `v0.2.0` module release.
+Import only the backend needed by an application. Every backend package is included in the root `v0.3.0` module release.
 
-| Package | Store | Locker | Invalidation bus |
-| --- | --- | --- | --- |
-| `backend/disk` (bbolt) | yes | no | no |
-| `backend/postgres` | yes | yes | yes |
-| `backend/redis` | yes | yes | yes |
-| `backend/valkey` | yes | yes | yes |
-| `backend/dragonfly` | yes | yes | yes |
-| `backend/memcached` | yes | yes | no |
-| `backend/hazelcast` | yes | no | yes |
+| Package | Store | BatchStore | Locker | Invalidation bus |
+| --- | --- | --- | --- | --- |
+| `backend/disk` (bbolt) | yes | yes (one transaction) | no | no |
+| `backend/postgres` | yes | no | yes | yes |
+| `backend/redis` | yes | yes (pipelined) | yes | yes |
+| `backend/valkey` | yes | yes (pipelined) | yes | yes |
+| `backend/dragonfly` | yes | yes (pipelined) | yes | yes |
+| `backend/memcached` | yes | no | yes | no |
+| `backend/hazelcast` | yes | no | no | yes |
+
+The in-process `backend/memory` store also implements `BatchStore`.
 
 For example, import `github.com/justusschock/go-cache/backend/redis` after installing the root module.
 
@@ -247,7 +312,7 @@ GOWORK=off go vet ./...
 pre-commit run --all-files
 ```
 
-GitHub Actions runs the complete unit, race, vet, formatting, assertion-policy, and module-verification gates on Go 1.22.x, 1.23.x, 1.24.x, 1.25.x, and 1.26.x. Integration CI retains race-enabled checks against Redis, Dragonfly, Valkey, Memcached, Hazelcast, and PostgreSQL. Tag builds additionally use `GOWORK=off` and verify the single released module. The repository publishes one annotated release tag, `v0.2.0`.
+GitHub Actions runs the complete unit, race, vet, formatting, assertion-policy, and module-verification gates on Go 1.25.x and 1.26.x. Integration CI retains race-enabled checks against Redis, Dragonfly, Valkey, Memcached, Hazelcast, and PostgreSQL. Tag builds additionally use `GOWORK=off` and verify the single released module. Releases are annotated repository tags such as `v0.3.0`; time-dependent tests use `testing/synctest`, which sets the Go 1.25 minimum.
 
 CI private-module access uses the repository secret `GO_MODULES_TOKEN` before `setup-go` or any Go dependency command. The workflow fails explicitly when the secret is absent, passes it only through a masked environment variable, and never prints it. The runner sets `GOPRIVATE` and `GONOSUMDB` for `github.com/justusschock/*` and installs an ephemeral authenticated Git URL rewrite; it does not change developer credential configuration.
 

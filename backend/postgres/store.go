@@ -8,6 +8,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	cache "github.com/justusschock/go-cache"
 	"github.com/justusschock/go-cache/internal/wire"
@@ -157,8 +158,9 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", advisoryKey(namespaceHash)); err != nil {
 		return fmt.Errorf("cache postgres set lock: %w", err)
 	}
+	expiresAt := expiresAtParameter(entry)
 	var fresh bool
-	if err := tx.QueryRow(ctx, "SELECT $1::timestamptz > clock_timestamp()", entry.ExpiresAt).Scan(&fresh); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT $1::timestamptz > clock_timestamp()", expiresAt).Scan(&fresh); err != nil {
 		return fmt.Errorf("cache postgres check expiry: %w", err)
 	}
 	if !fresh {
@@ -185,7 +187,7 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (namespace_hash, key_hash) DO UPDATE
 		SET payload = EXCLUDED.payload, expires_at = EXCLUDED.expires_at
-	`, namespaceHash[:], keyHash[:], payload, entry.ExpiresAt); err != nil {
+	`, namespaceHash[:], keyHash[:], payload, expiresAt); err != nil {
 		return fmt.Errorf("cache postgres set: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -260,6 +262,15 @@ func (s *Store[K, V]) DeleteExpired(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("cache postgres delete expired: %w", err)
 	}
 	return removed, nil
+}
+
+// expiresAtParameter maps entries without an expiration to PostgreSQL's
+// 'infinity' timestamp, which is never at or before clock_timestamp().
+func expiresAtParameter[V any](entry cache.Entry[V]) any {
+	if entry.NeverExpires() {
+		return pgtype.Timestamptz{InfinityModifier: pgtype.Infinity, Valid: true}
+	}
+	return entry.ExpiresAt
 }
 
 func advisoryKey(namespaceHash [32]byte) int64 {

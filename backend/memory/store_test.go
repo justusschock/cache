@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	cache "github.com/justusschock/go-cache"
 	"github.com/justusschock/go-cache/backend/memory"
 	"github.com/justusschock/go-cache/internal/cachetest"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestStoreContract(t *testing.T) {
@@ -56,17 +58,73 @@ func TestStoreEvictsLeastRecentlyUsedEntryAtCapacity(t *testing.T) {
 	assert.Equal(t, 2, store.Len())
 }
 
-func TestStoreSweepsExpiredEntriesWithoutReads(t *testing.T) {
-	store, err := memory.NewWithOptions[string, int](memory.Options{
-		MaxEntries:      10,
-		CleanupInterval: time.Millisecond,
+func TestBatchStoreContract(t *testing.T) {
+	cachetest.RunBatchStoreContract(t, func(t *testing.T) cache.BatchStore[string, int] {
+		store := memory.New[string, int]()
+		t.Cleanup(func() { assert.NoError(t, store.Close()) })
+		return store
 	})
-	assert.NoError(t, err)
+}
+
+func TestStoreSweepsExpiredEntriesWithoutReads(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store, err := memory.NewWithOptions[string, int](memory.Options{
+			MaxEntries:      10,
+			CleanupInterval: time.Minute,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { assert.NoError(t, store.Close()) })
+
+		entry := cache.Entry[int]{Value: 1, Found: true, ExpiresAt: time.Now().Add(30 * time.Second)}
+		require.NoError(t, store.Set(context.Background(), "users", "alice", entry))
+		require.NoError(t, store.Set(context.Background(), "users", "forever", cache.Entry[int]{Value: 2, Found: true}))
+
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		assert.Equal(t, 1, store.Len())
+	})
+}
+
+func TestStoreKeepsNoExpiryEntriesAcrossSweeps(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		store, err := memory.NewWithOptions[string, int](memory.Options{
+			MaxEntries:      10,
+			CleanupInterval: time.Minute,
+		})
+		require.NoError(t, err)
+		t.Cleanup(func() { assert.NoError(t, store.Close()) })
+
+		require.NoError(t, store.SetMany(context.Background(), "users", []string{"alice", "bob"}, []cache.Entry[int]{
+			{Value: 1, Found: true},
+			{Value: 2, Found: true, ExpiresAt: time.Now().Add(time.Hour)},
+		}))
+
+		time.Sleep(365 * 24 * time.Hour)
+		synctest.Wait()
+		entries, present, err := store.GetMany(context.Background(), "users", []string{"alice", "bob"})
+		require.NoError(t, err)
+		assert.Equal(t, []bool{true, false}, present)
+		assert.Equal(t, 1, entries[0].Value)
+		assert.True(t, entries[0].ExpiresAt.IsZero())
+		assert.Equal(t, 1, store.Len())
+	})
+}
+
+func TestSetManyRespectsCapacity(t *testing.T) {
+	store, err := memory.NewWithOptions[string, int](memory.Options{
+		MaxEntries:      2,
+		CleanupInterval: time.Hour,
+	})
+	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, store.Close()) })
 
-	entry := cache.Entry[int]{Value: 1, Found: true, ExpiresAt: time.Now().Add(5 * time.Millisecond)}
-	assert.NoError(t, store.Set(context.Background(), "users", "alice", entry))
-	assert.Eventually(t, func() bool { return store.Len() == 0 }, time.Second, time.Millisecond)
+	entries := []cache.Entry[int]{{Value: 1, Found: true}, {Value: 2, Found: true}, {Value: 3, Found: true}}
+	require.NoError(t, store.SetMany(context.Background(), "users", []string{"a", "b", "c"}, entries))
+
+	_, present, err := store.GetMany(context.Background(), "users", []string{"a", "b", "c"})
+	require.NoError(t, err)
+	assert.Equal(t, []bool{false, true, true}, present)
+	assert.Equal(t, 2, store.Len())
 }
 
 func TestStoreCloseIsIdempotent(t *testing.T) {

@@ -100,7 +100,7 @@ func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.E
 	if err != nil {
 		return zero, false, fmt.Errorf("cache memcached decode: %w", err)
 	}
-	if recordGeneration != generation || !entry.ExpiresAt.After(time.Now()) {
+	if recordGeneration != generation || entry.Expired(time.Now()) {
 		return zero, false, nil
 	}
 	return entry, true, nil
@@ -114,7 +114,7 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 	if err != nil {
 		return err
 	}
-	if !entry.ExpiresAt.After(time.Now()) {
+	if entry.Expired(time.Now()) {
 		return s.Invalidate(ctx, namespace, key)
 	}
 	generation, err := s.generation(generationKey)
@@ -125,7 +125,7 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 	if err != nil {
 		return err
 	}
-	item := &memcache.Item{Key: entryKey, Value: envelope, Expiration: expiration(entry.ExpiresAt)}
+	item := &memcache.Item{Key: entryKey, Value: envelope, Expiration: entryExpiration(entry)}
 	if err := s.client.Set(item); err != nil {
 		return fmt.Errorf("cache memcached set: %w", err)
 	}
@@ -219,6 +219,15 @@ func expiration(expiresAt time.Time) int32 {
 		return 1
 	}
 	return int32(absolute)
+}
+
+// entryExpiration returns the Memcached expiration for entry; entries without
+// an expiration use 0, which Memcached treats as never expiring.
+func entryExpiration[V any](entry cache.Entry[V]) int32 {
+	if entry.NeverExpires() {
+		return 0
+	}
+	return expiration(entry.ExpiresAt)
 }
 
 func leaseExpiration(expiresAt time.Time) (int32, error) {

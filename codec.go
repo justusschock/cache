@@ -28,9 +28,6 @@ func DefaultCodec[T any]() Codec[T] {
 
 func (automaticCodec[T]) Encode(value T) ([]byte, error) {
 	typeOf := reflect.TypeFor[T]()
-	if typeOf == nil {
-		return json.Marshal(value)
-	}
 	reflected := reflect.ValueOf(value)
 	switch typeOf.Kind() {
 	case reflect.String:
@@ -61,7 +58,7 @@ func (automaticCodec[T]) Encode(value T) ([]byte, error) {
 func (automaticCodec[T]) Decode(encoded []byte) (T, error) {
 	var zero T
 	typeOf := reflect.TypeFor[T]()
-	if typeOf == nil || typeOf.Kind() == reflect.Interface {
+	if typeOf.Kind() == reflect.Interface {
 		return zero, ErrUntypedValue
 	}
 	value := reflect.New(typeOf).Elem()

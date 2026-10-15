@@ -116,7 +116,7 @@ func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.E
 	if err != nil {
 		return zero, false, fmt.Errorf("cache hazelcast decode: %w", err)
 	}
-	if recordGeneration != generation || !entry.ExpiresAt.After(time.Now()) {
+	if recordGeneration != generation || entry.Expired(time.Now()) {
 		return zero, false, nil
 	}
 	return entry, true, nil
@@ -130,8 +130,7 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 	if err != nil {
 		return err
 	}
-	ttl := time.Until(entry.ExpiresAt)
-	if ttl <= 0 {
+	if entry.Expired(time.Now()) {
 		return s.Invalidate(ctx, namespace, key)
 	}
 	generation, err := s.generation(ctx, generationKey)
@@ -142,7 +141,12 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 	if err != nil {
 		return err
 	}
-	if err := s.entries.SetWithTTL(ctx, entryKey, envelope, ttl); err != nil {
+	if entry.NeverExpires() {
+		err = s.entries.Set(ctx, entryKey, envelope)
+	} else {
+		err = s.entries.SetWithTTL(ctx, entryKey, envelope, time.Until(entry.ExpiresAt))
+	}
+	if err != nil {
 		return fmt.Errorf("cache hazelcast set: %w", err)
 	}
 	return nil

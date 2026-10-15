@@ -31,6 +31,11 @@ func TestStoreIntegrationContract(t *testing.T) {
 		require.NoError(t, storeErr)
 		return store
 	})
+	cachetest.RunBatchStoreContract(t, func(t *testing.T) cache.BatchStore[string, int] {
+		store, storeErr := valkeycache.New[string, int](client)
+		require.NoError(t, storeErr)
+		return store
+	})
 }
 
 func TestLockerIntegration(t *testing.T) {

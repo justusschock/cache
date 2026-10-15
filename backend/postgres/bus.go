@@ -83,7 +83,10 @@ func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, ha
 	if _, err := connection.Exec(ctx, "LISTEN "+invalidationNotificationChannel); err != nil {
 		return fmt.Errorf("cache postgres listen invalidation: %w", err)
 	}
-	defer connection.Exec(context.WithoutCancel(ctx), "UNLISTEN "+invalidationNotificationChannel)
+	defer func() {
+		// Subscribe already reports why it returned; an UNLISTEN failure adds nothing actionable.
+		_, _ = connection.Exec(context.WithoutCancel(ctx), "UNLISTEN "+invalidationNotificationChannel)
+	}()
 
 	for {
 		notification, err := connection.Conn().WaitForNotification(ctx)

@@ -32,6 +32,11 @@ func TestStoreIntegrationContract(t *testing.T) {
 		require.NoError(t, err)
 		return store
 	})
+	cachetest.RunBatchStoreContract(t, func(t *testing.T) cache.BatchStore[string, int] {
+		store, err := dragonfly.New[string, int](client)
+		require.NoError(t, err)
+		return store
+	})
 }
 
 func TestLockerIntegration(t *testing.T) {
