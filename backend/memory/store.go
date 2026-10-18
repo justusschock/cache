@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
+	cache "github.com/justusschock/cache"
 )
 
 // ErrInvalidOptions reports Options with a non-positive MaxEntries or

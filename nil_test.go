@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
-	coordination "github.com/justusschock/go-distributed-coordination"
-	"github.com/justusschock/go-messaging"
+	cache "github.com/justusschock/cache"
+	coordination "github.com/justusschock/distributed-coordination"
+	"github.com/justusschock/messaging"
 	"github.com/stretchr/testify/assert"
 )
 

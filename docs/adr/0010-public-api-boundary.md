@@ -47,7 +47,7 @@ The public API is:
 
 | Package | Public contents |
 |---|---|
-| `github.com/justusschock/go-cache` | `Store`, `BatchStore`, `Entry`, `Cache`, `EntryCache`, `BatchCache`, `StandardCache`/`New`, `NoExpiry`, `Codec`/`DefaultCodec`, `LayeredStore`/`NewLayered`/`NewLayeredWithInvalidationBus` with `LayeredOption`s, `Observer`/`Event`, `PullThroughCache`/`NewPullThrough` with `PullThroughOption`s and `Loader`, `Locker`/`Lease`/`ObservableLease`, `CoordinationLocker`/`FillKeyFunc`, `InvalidationBus`/`InvalidationEvent`/`InvalidationKind`/`InvalidationHandler`, `MessagingInvalidationBus`/`SubscriptionFactory`, and all sentinel errors |
+| `github.com/justusschock/cache` | `Store`, `BatchStore`, `Entry`, `Cache`, `EntryCache`, `BatchCache`, `StandardCache`/`New`, `NoExpiry`, `Codec`/`DefaultCodec`, `LayeredStore`/`NewLayered`/`NewLayeredWithInvalidationBus` with `LayeredOption`s, `Observer`/`Event`, `PullThroughCache`/`NewPullThrough` with `PullThroughOption`s and `Loader`, `Locker`/`Lease`/`ObservableLease`, `CoordinationLocker`/`FillKeyFunc`, `InvalidationBus`/`InvalidationEvent`/`InvalidationKind`/`InvalidationHandler`, `MessagingInvalidationBus`/`SubscriptionFactory`, and all sentinel errors |
 | `backend/memory` | `Store` (`New`, `NewWithOptions`, `Options`, `Len`, `Close`, batch methods), `Locker`, `InvalidationBus` (`NewInvalidationBus`, `SubscriberCount`), `ErrInvalidOptions` |
 | `backend/disk` | `Store` (`Open`, options, batch methods, `ScanPrefix`, `DeletePrefix`, `Close`) and its errors |
 | `backend/redis`, `valkey`, `dragonfly`, `memcached`, `hazelcast`, `postgres` | `Store`/`New`, `Locker`/`NewLocker` and `InvalidationBus`/`NewInvalidationBus` where offered, codec options, errors, and PostgreSQL's `Migrate`/`DeleteExpired` |

@@ -1,6 +1,6 @@
-# go-cache
+# cache
 
-go-cache provides typed, composable caches for Go: one generic storage
+cache provides typed, composable caches for Go: one generic storage
 contract with in-process, on-disk and remote backends, layered stores with
 promotion, pull-through loading with single flight and negative caching,
 renewable distributed fill leases, and transport-neutral invalidation between
@@ -23,7 +23,7 @@ durable system of record.
   negative caching, loader-panic recovery, and optional distributed fill
   leases.
 - Distributed invalidation through any `InvalidationBus`, with adapters for
-  go-messaging and go-distributed-coordination.
+  messaging and distributed-coordination.
 - Backends: bounded in-process LRU, bbolt file with ordered prefix scans,
   Redis, Valkey, Dragonfly, Memcached, Hazelcast and PostgreSQL.
 - `cachetest`: public conformance suites for your own stores and
@@ -32,7 +32,7 @@ durable system of record.
 ## Installation
 
 ```sh
-go get github.com/justusschock/go-cache@latest
+go get github.com/justusschock/cache@latest
 ```
 
 Requires Go 1.25 or newer. The root package and every backend are one
@@ -50,8 +50,8 @@ import (
 	"fmt"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/backend/memory"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/backend/memory"
 )
 
 type User struct {
@@ -171,7 +171,7 @@ Authoritative misses (`found == false`) are stored as negative entries only
 when the wrapped cache implements `EntryCache`, as `StandardCache` does.
 
 For cross-process fill coordination, pass a `Locker`: a backend locker, or
-any go-distributed-coordination backend through `NewCoordinationLocker`.
+any distributed-coordination backend through `NewCoordinationLocker`.
 
 ```go
 locker, err := cache.NewCoordinationLocker(
@@ -255,7 +255,7 @@ hashed layouts are separate; always reopen a file with the same choice.
 
 | Package | Purpose |
 | --- | --- |
-| [`github.com/justusschock/go-cache`](https://pkg.go.dev/github.com/justusschock/go-cache) | Contracts (`Store`, `Cache`, `Locker`, `InvalidationBus`), `StandardCache`, `LayeredStore`, `PullThroughCache`, codecs and adapters |
+| [`github.com/justusschock/cache`](https://pkg.go.dev/github.com/justusschock/cache) | Contracts (`Store`, `Cache`, `Locker`, `InvalidationBus`), `StandardCache`, `LayeredStore`, `PullThroughCache`, codecs and adapters |
 | `backend/memory` | Bounded in-process LRU store, locker and invalidation bus |
 | `backend/disk` | Persistent bbolt store with atomic batches and prefix scans |
 | `backend/redis` | Redis store, locker and Pub/Sub invalidation bus |
@@ -328,7 +328,7 @@ and other values as JSON; interface types need a custom codec.
 Format changes are rolled out reader-first: every process that reads a
 shared namespace must understand a new version before any process writes it.
 
-**Non-goals.** go-cache is not a correctness-critical database and offers no
+**Non-goals.** cache is not a correctness-critical database and offers no
 write-through persistence or transactions across keys, no strong coherence or
 exactly-once invalidation, no fenced writes after lease loss, and no
 connection management or provisioning.
@@ -340,7 +340,7 @@ Every break is listed in [CHANGELOG.md](CHANGELOG.md) and backed by an ADR.
 
 - [docs/README.md](docs/README.md): requirements (PRD) and architecture
   decision records.
-- [pkg.go.dev](https://pkg.go.dev/github.com/justusschock/go-cache): API
+- [pkg.go.dev](https://pkg.go.dev/github.com/justusschock/cache): API
   reference and examples.
 
 ## Contributing

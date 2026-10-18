@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/hazelcast/hazelcast-go-client"
-	cache "github.com/justusschock/go-cache"
-	hazelcastcache "github.com/justusschock/go-cache/backend/hazelcast"
-	"github.com/justusschock/go-cache/cachetest"
+	cache "github.com/justusschock/cache"
+	hazelcastcache "github.com/justusschock/cache/backend/hazelcast"
+	"github.com/justusschock/cache/cachetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

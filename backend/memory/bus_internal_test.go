@@ -5,7 +5,7 @@ import (
 	"testing"
 	"testing/synctest"
 
-	cache "github.com/justusschock/go-cache"
+	cache "github.com/justusschock/cache"
 	"github.com/stretchr/testify/assert"
 )
 

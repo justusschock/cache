@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/internal/wire"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/internal/wire"
 	bolt "go.etcd.io/bbolt"
 )
 

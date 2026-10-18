@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
-	rediscache "github.com/justusschock/go-cache/backend/redis"
-	"github.com/justusschock/go-cache/cachetest"
+	cache "github.com/justusschock/cache"
+	rediscache "github.com/justusschock/cache/backend/redis"
+	"github.com/justusschock/cache/cachetest"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

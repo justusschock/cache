@@ -1,4 +1,4 @@
-# PRD 0001: go-cache
+# PRD 0001: cache
 
 | Field | Value |
 |---|---|
@@ -23,7 +23,7 @@ cases wrong: a canceled caller canceling a fill other callers need, a fill
 completing after its distributed lease was lost, or an invalidation that
 races a write.
 
-go-cache provides these pieces as small, typed, composable parts with one
+cache provides these pieces as small, typed, composable parts with one
 storage contract (`Store`) and interchangeable backends, so that an
 application can start with an in-process cache and add a shared tier,
 distributed fill leases or cross-process invalidation without changing the
@@ -64,7 +64,7 @@ code that reads and writes values.
   invalidation listeners.
 - G4 Transport-neutral distributed features: fill leases through any
   `Locker`, invalidation through any `InvalidationBus`, with adapters for
-  go-distributed-coordination and go-messaging.
+  distributed-coordination and messaging.
 - G5 Stable, versioned persistence formats for serialized backends.
 - G6 A public conformance suite for third-party implementations.
 
@@ -96,11 +96,11 @@ code that reads and writes values.
 | FR-CACHE-09 | `PullThroughCache` loads misses through a `Loader` with one shared load per key; each caller waits with its own context, the load continues while any waiter remains, is canceled when the last waiter leaves, and a later request starts a fresh load. | MUST |
 | FR-CACHE-10 | Authoritative misses are stored as negative entries for the negative TTL when the wrapped cache is an `EntryCache`; loader errors are never cached; loader panics are returned as `ErrLoaderPanic`. | MUST |
 | FR-CACHE-11 | With `WithLocker`, a fill holds a renewable lease: contention is polled at the configured interval while re-checking the cache, the lease is refreshed every half TTL, observable loss or refresh failure cancels the loader and prevents the cache write (`ErrFillLeaseLost`), and the lease is released with a non-canceled context. Lock errors fail the load unless `WithLoadOnLockError` is set. | MUST |
-| FR-CACHE-12 | `CoordinationLocker` adapts any go-distributed-coordination `Backend` into a `Locker` with observable leases, mapping contention to `ErrLockNotAcquired` and ownership loss to `ErrLeaseLost`. | MUST |
+| FR-CACHE-12 | `CoordinationLocker` adapts any distributed-coordination `Backend` into a `Locker` with observable leases, mapping contention to `ErrLockNotAcquired` and ownership loss to `ErrLeaseLost`. | MUST |
 | FR-CACHE-13 | `DefaultCodec` encodes strings, byte slices, booleans and numeric scalars directly and other values as JSON, and rejects decoding into interface types with `ErrUntypedValue`; custom codecs can be supplied to every serialized backend. | MUST |
 | FR-CACHE-14 | A `LayeredStore` with an invalidation bus publishes key-scoped events for `Set` and `Invalidate` and namespace-scoped events for `InvalidateAll`; `ListenInvalidations` applies remote events only to layers above the shared layer, so duplicate and out-of-order delivery is safe. | MUST |
 | FR-CACHE-15 | Every `InvalidationBus` delivers published events to subscribers of the namespace across instances, rejects a nil handler with `ErrNilInvalidationHandler`, removes the subscription and returns the context error when its context ends. Implementations exist for memory, Redis, Valkey, Dragonfly, PostgreSQL and Hazelcast; the memory bus also reports a namespace's active subscriptions through `SubscriberCount`. | MUST |
-| FR-CACHE-16 | `MessagingInvalidationBus` adapts typed go-messaging publishers and subscribers, publishing to the subject returned by the subscription factory, acknowledging handled and foreign-namespace deliveries and negatively acknowledging handler failures. | MUST |
+| FR-CACHE-16 | `MessagingInvalidationBus` adapts typed messaging publishers and subscribers, publishing to the subject returned by the subscription factory, acknowledging handled and foreign-namespace deliveries and negatively acknowledging handler failures. | MUST |
 | FR-CACHE-17 | The memory backend is bounded by a global LRU capacity, sweeps expired entries periodically, keeps no-expiry entries across sweeps, does not retain metadata for empty namespaces, validates its options and has an idempotent `Close`. | MUST |
 | FR-CACHE-18 | The disk backend persists entries in an owner-only bbolt file across reopen, applies each batch in one transaction, and with `WithOrderedKeys` supports `ScanPrefix` and `DeletePrefix` in encoded-key order, returning `ErrOrderedKeysRequired` otherwise. | MUST |
 | FR-CACHE-19 | Remote backends (Redis, Valkey, Dragonfly, Memcached, Hazelcast, PostgreSQL) implement `Store` over caller-owned clients, with logical expiry enforced from the envelope and native TTLs only as physical cleanup; Redis, Valkey and Dragonfly implement `BatchStore` with pipelines; PostgreSQL provides `Migrate` and `DeleteExpired` and uses the server clock. | MUST |

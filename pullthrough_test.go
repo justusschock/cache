@@ -9,8 +9,8 @@ import (
 	"testing/synctest"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/backend/memory"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/backend/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

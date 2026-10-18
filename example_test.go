@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/backend/memory"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/backend/memory"
 )
 
 type User struct {

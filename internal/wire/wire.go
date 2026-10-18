@@ -11,7 +11,7 @@ import (
 	"reflect"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
+	cache "github.com/justusschock/cache"
 )
 
 // ErrInvalidEnvelope reports a truncated envelope or an unknown version.

@@ -3,7 +3,7 @@ package postgres_test
 import (
 	"testing"
 
-	"github.com/justusschock/go-cache/backend/postgres"
+	"github.com/justusschock/cache/backend/postgres"
 	"github.com/stretchr/testify/assert"
 )
 

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	hazelcastclient "github.com/hazelcast/hazelcast-go-client"
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/internal/wire"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/internal/wire"
 )
 
 var (

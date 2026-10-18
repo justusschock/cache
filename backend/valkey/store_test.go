@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	valkeycache "github.com/justusschock/go-cache/backend/valkey"
+	valkeycache "github.com/justusschock/cache/backend/valkey"
 	"github.com/stretchr/testify/assert"
 	valkeyclient "github.com/valkey-io/valkey-go"
 )

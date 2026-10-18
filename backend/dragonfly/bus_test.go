@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	cache "github.com/justusschock/go-cache"
+	cache "github.com/justusschock/cache"
 	"github.com/stretchr/testify/assert"
 )
 

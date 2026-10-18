@@ -18,7 +18,7 @@ expected to protect the source of truth from stampedes. The code implements:
 - every exported type is safe for concurrent use (mutex-protected memory
   structures, immutable configuration after construction);
 - `PullThroughCache` shares one fill per key through an internal flight
-  group built on `go-concurrency` futures. The fill runs on a context derived
+  group built on `concurrency` futures. The fill runs on a context derived
   with `context.WithoutCancel` from the first caller and canceled only when
   the last waiter leaves; each waiter waits with its own context; a
   completed or abandoned flight is removed so later requests start fresh;

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/justusschock/go-messaging"
+	"github.com/justusschock/messaging"
 )
 
 // Errors returned by NewMessagingInvalidationBus.
@@ -19,7 +19,7 @@ var (
 // for both publishing and subscribing. In particular, Subject must be stable.
 type SubscriptionFactory func(namespace string) messaging.Subscription
 
-// MessagingInvalidationBus is an InvalidationBus over typed go-messaging
+// MessagingInvalidationBus is an InvalidationBus over typed messaging
 // publishers and subscribers. It is safe for concurrent use if they are.
 type MessagingInvalidationBus[K comparable] struct {
 	publisher  messaging.Publisher[InvalidationEvent[K]]
@@ -63,7 +63,7 @@ func (b *MessagingInvalidationBus[K]) Publish(ctx context.Context, event Invalid
 	return nil
 }
 
-// Subscribe follows the go-messaging subscriber lifetime and normally blocks
+// Subscribe follows the messaging subscriber lifetime and normally blocks
 // until ctx ends. Handled deliveries and deliveries for another namespace are
 // acknowledged; handler failures are negatively acknowledged so that an
 // at-least-once transport redelivers them.

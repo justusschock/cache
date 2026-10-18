@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	cache "github.com/justusschock/go-cache"
+	cache "github.com/justusschock/cache"
 )
 
 // InvalidationBus distributes events between workers in the same process.

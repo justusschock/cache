@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/backend/postgres"
-	"github.com/justusschock/go-cache/cachetest"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/backend/postgres"
+	"github.com/justusschock/cache/cachetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

@@ -3,7 +3,7 @@ package memcached_test
 import (
 	"testing"
 
-	"github.com/justusschock/go-cache/backend/memcached"
+	"github.com/justusschock/cache/backend/memcached"
 	"github.com/stretchr/testify/assert"
 )
 

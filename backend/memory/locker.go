@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
+	cache "github.com/justusschock/cache"
 )
 
 type lockRecord struct {

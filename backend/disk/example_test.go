@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/backend/disk"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/backend/disk"
 )
 
 func ExampleStore_ScanPrefix() {

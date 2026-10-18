@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	coordination "github.com/justusschock/go-distributed-coordination"
+	coordination "github.com/justusschock/distributed-coordination"
 )
 
 // Errors returned by NewCoordinationLocker and CoordinationLocker.Lock.
@@ -22,7 +22,7 @@ var (
 // stable across deployments, or different keys may share one lease.
 type FillKeyFunc[K comparable] func(namespace string, key K) (string, error)
 
-// CoordinationLocker is a Locker backed by any go-distributed-coordination
+// CoordinationLocker is a Locker backed by any distributed-coordination
 // Backend. Its leases implement ObservableLease. It is safe for concurrent
 // use if the backend is.
 type CoordinationLocker[K comparable] struct {

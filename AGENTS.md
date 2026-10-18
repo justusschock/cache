@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Rules for anyone, human or agent, changing go-cache. They are binding. If a
+Rules for anyone, human or agent, changing cache. They are binding. If a
 change has to break one, say so in the pull request and, where it is a design
 decision, record it in an ADR.
 
-go-cache is a library of typed, composable caches for Go: a generic storage
+cache is a library of typed, composable caches for Go: a generic storage
 contract with in-process, on-disk and remote backends, layering, pull-through
 loading with single flight and fill leases, and distributed invalidation.
 Its requirements and design decisions are recorded in
@@ -57,7 +57,7 @@ No behaviour is added or changed before the documents that govern it say so.
 - `.` (package `cache`): the `Store`/`BatchStore` contract, `Entry`,
   `StandardCache`, `LayeredStore`, `PullThroughCache`, `Codec`, the
   `Locker`/`Lease` and `InvalidationBus` contracts, and the
-  go-distributed-coordination and go-messaging adapters.
+  distributed-coordination and messaging adapters.
 - `backend/memory/`: bounded in-process LRU store, locker and invalidation
   bus; the reference implementation.
 - `backend/disk/`: persistent bbolt store with atomic batches and ordered
@@ -79,8 +79,8 @@ No behaviour is added or changed before the documents that govern it say so.
 1. **Small, explicit contracts.** Every exported type and function documents
    its behaviour, errors, concurrency safety and cancellation.
 2. **Dependencies.** Standard library first. The root package imports only the
-   standard library and the sibling libraries go-concurrency,
-   go-distributed-coordination and go-messaging; backend client modules are
+   standard library and the sibling libraries concurrency,
+   distributed-coordination and messaging; backend client modules are
    imported only by their backend package (ADR-0003). A new dependency needs
    an ADR.
 3. **Errors.** Sentinel errors and typed errors are part of the API; wrap

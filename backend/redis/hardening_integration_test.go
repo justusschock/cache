@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/internal/wire"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/internal/wire"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

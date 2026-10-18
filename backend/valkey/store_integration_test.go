@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
-	valkeycache "github.com/justusschock/go-cache/backend/valkey"
-	"github.com/justusschock/go-cache/cachetest"
+	cache "github.com/justusschock/cache"
+	valkeycache "github.com/justusschock/cache/backend/valkey"
+	"github.com/justusschock/cache/cachetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	valkeyclient "github.com/valkey-io/valkey-go"

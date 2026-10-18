@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"math"
 
-	cache "github.com/justusschock/go-cache"
+	cache "github.com/justusschock/cache"
 )
 
 const invalidationHeaderSize = 14

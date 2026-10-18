@@ -3,8 +3,8 @@ package dragonfly_test
 import (
 	"testing"
 
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/backend/dragonfly"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/backend/dragonfly"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 )

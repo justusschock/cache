@@ -19,7 +19,7 @@ features cross process boundaries:
   predicates on PostgreSQL, add/CAS on Memcached) so that refresh and release
   never affect a successor; Memcached release replaces the token with a
   short tombstone instead of deleting. `CoordinationLocker` adapts any
-  go-distributed-coordination backend. Lease keys come from a
+  distributed-coordination backend. Lease keys come from a
   caller-provided `FillKeyFunc` that must be injective over
   `(namespace, key)`.
 - **Invalidation.** `InvalidationBus` carries `InvalidationEvent`s (key- or

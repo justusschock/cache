@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/internal/wire"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/internal/wire"
 	valkeyclient "github.com/valkey-io/valkey-go"
 )
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	hazelcastcache "github.com/justusschock/go-cache/backend/hazelcast"
+	hazelcastcache "github.com/justusschock/cache/backend/hazelcast"
 	"github.com/stretchr/testify/assert"
 )
 

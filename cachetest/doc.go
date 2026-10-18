@@ -1,5 +1,5 @@
 // Package cachetest provides conformance suites for implementations of the
-// go-cache store and invalidation-bus interfaces.
+// cache store and invalidation-bus interfaces.
 //
 // Every backend in this module passes these suites, and third-party
 // implementations of [cache.Store], [cache.BatchStore] and

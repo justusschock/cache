@@ -4,7 +4,7 @@ import (
 	"context"
 	"sync"
 
-	"github.com/justusschock/go-concurrency"
+	"github.com/justusschock/concurrency"
 )
 
 type loadResult[V any] struct {

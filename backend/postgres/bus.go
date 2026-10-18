@@ -7,8 +7,8 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/internal/wire"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/internal/wire"
 )
 
 const invalidationNotificationChannel = "go_cache_invalidation"

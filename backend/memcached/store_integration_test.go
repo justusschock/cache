@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/backend/memcached"
-	"github.com/justusschock/go-cache/cachetest"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/backend/memcached"
+	"github.com/justusschock/cache/cachetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

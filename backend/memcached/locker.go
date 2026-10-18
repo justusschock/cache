@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/bradfitz/gomemcache/memcache"
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-cache/internal/wire"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/cache/internal/wire"
 )
 
 type lockerConfig[K comparable] struct {

@@ -1,6 +1,6 @@
-# go-cache documentation
+# cache documentation
 
-Requirements (PRDs) and architecture decisions (ADRs) for go-cache. The
+Requirements (PRDs) and architecture decisions (ADRs) for cache. The
 process is described in [ADR-0001](adr/0001-record-architecture-decisions.md)
 and [AGENTS.md](../AGENTS.md); new documents start from
 [the PRD template](prd/TEMPLATE.md) or [the ADR template](adr/TEMPLATE.md).
@@ -9,7 +9,7 @@ and [AGENTS.md](../AGENTS.md); new documents start from
 
 | PRD | Title | Status | Implementation |
 |---|---|---|---|
-| [0001](prd/0001-go-cache.md) | go-cache | Accepted | Complete |
+| [0001](prd/0001-cache.md) | cache | Accepted | Complete |
 
 ## Architecture decisions
 

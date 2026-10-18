@@ -30,9 +30,9 @@ and three sibling libraries:
 
 | Dependency | Used by | Why |
 |---|---|---|
-| `github.com/justusschock/go-concurrency` | root (`flight.go`) | typed futures for single-flight fills |
-| `github.com/justusschock/go-distributed-coordination` | root (`CoordinationLocker`) | lease backends for fill coordination |
-| `github.com/justusschock/go-messaging` | root (`MessagingInvalidationBus`) | transport-neutral invalidation delivery |
+| `github.com/justusschock/concurrency` | root (`flight.go`) | typed futures for single-flight fills |
+| `github.com/justusschock/distributed-coordination` | root (`CoordinationLocker`) | lease backends for fill coordination |
+| `github.com/justusschock/messaging` | root (`MessagingInvalidationBus`) | transport-neutral invalidation delivery |
 
 Everything else uses the standard library.
 

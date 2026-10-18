@@ -10,7 +10,7 @@
 
 ## Context
 
-Recorded retrospectively for the first public release. go-cache has grown a
+Recorded retrospectively for the first public release. cache has grown a
 number of decisions that are visible in the code (a generic storage
 contract, one module for all backends, best-effort leases, versioned wire
 formats) but were never written down. Contributors who were not present

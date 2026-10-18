@@ -7,9 +7,9 @@ import (
 	"testing/synctest"
 	"time"
 
-	cache "github.com/justusschock/go-cache"
-	"github.com/justusschock/go-messaging"
-	messagingmemory "github.com/justusschock/go-messaging/memory"
+	cache "github.com/justusschock/cache"
+	"github.com/justusschock/messaging"
+	messagingmemory "github.com/justusschock/messaging/memory"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

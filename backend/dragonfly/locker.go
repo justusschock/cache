@@ -1,8 +1,8 @@
 package dragonfly
 
 import (
-	cache "github.com/justusschock/go-cache"
-	rediscache "github.com/justusschock/go-cache/backend/redis"
+	cache "github.com/justusschock/cache"
+	rediscache "github.com/justusschock/cache/backend/redis"
 	goredis "github.com/redis/go-redis/v9"
 )
 
