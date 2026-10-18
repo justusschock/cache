@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-20
 func TestLockerRejectsExpiryOutsideMemcachedUnixRange(t *testing.T) {
 	client := memcache.New("127.0.0.1:0")
 	client.Timeout = 10 * time.Millisecond
@@ -29,6 +30,7 @@ func TestLockerRejectsExpiryOutsideMemcachedUnixRange(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrInvalidTTL)
 }
 
+// FR-CACHE-20
 func TestLeaseRefreshRejectsExpiryOutsideMemcachedUnixRange(t *testing.T) {
 	client := memcache.New("127.0.0.1:0")
 	client.Timeout = 10 * time.Millisecond
@@ -38,10 +40,11 @@ func TestLeaseRefreshRejectsExpiryOutsideMemcachedUnixRange(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrInvalidTTL)
 }
 
+// FR-CACHE-20
 func TestLeaseReleaseCannotDeleteSuccessorAfterTombstoneCAS(t *testing.T) {
 	server := newReleaseRaceServer(t)
 	lease := &memcachedLease{
-		client: memcache.New(server.address()),
+		client: server.client(),
 		key:    "lease",
 		token:  "owner",
 	}
@@ -63,9 +66,10 @@ func unsupportedLeaseTTL() time.Duration {
 	return ttl
 }
 
+// releaseRaceServer is an in-process fake Memcached server reached through
+// net.Pipe, so the test needs no network access. Its CAS handler simulates a
+// successor acquiring the lease between the owner's gets and cas commands.
 type releaseRaceServer struct {
-	listener net.Listener
-
 	mu          sync.Mutex
 	connections map[net.Conn]struct{}
 	value       string
@@ -77,23 +81,30 @@ type releaseRaceServer struct {
 
 func newReleaseRaceServer(t *testing.T) *releaseRaceServer {
 	t.Helper()
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	require.NoError(t, err)
 	server := &releaseRaceServer{
-		listener:    listener,
 		connections: make(map[net.Conn]struct{}),
 		value:       "owner",
 		present:     true,
 		cas:         1,
 	}
-	server.wg.Add(1)
-	go server.serve()
 	t.Cleanup(server.close)
 	return server
 }
 
-func (s *releaseRaceServer) address() string {
-	return s.listener.Addr().String()
+// client returns a Memcached client whose connections are served in-process.
+func (s *releaseRaceServer) client() *memcache.Client {
+	// The address only has to resolve; DialContext never contacts it.
+	client := memcache.New("127.0.0.1:11211")
+	client.DialContext = func(context.Context, string, string) (net.Conn, error) {
+		clientSide, serverSide := net.Pipe()
+		s.mu.Lock()
+		s.connections[serverSide] = struct{}{}
+		s.mu.Unlock()
+		s.wg.Add(1)
+		go s.serveConnection(serverSide)
+		return clientSide, nil
+	}
+	return client
 }
 
 func (s *releaseRaceServer) state() (string, bool, bool) {
@@ -103,28 +114,12 @@ func (s *releaseRaceServer) state() (string, bool, bool) {
 }
 
 func (s *releaseRaceServer) close() {
-	_ = s.listener.Close()
 	s.mu.Lock()
 	for connection := range s.connections {
 		_ = connection.Close()
 	}
 	s.mu.Unlock()
 	s.wg.Wait()
-}
-
-func (s *releaseRaceServer) serve() {
-	defer s.wg.Done()
-	for {
-		connection, err := s.listener.Accept()
-		if err != nil {
-			return
-		}
-		s.mu.Lock()
-		s.connections[connection] = struct{}{}
-		s.mu.Unlock()
-		s.wg.Add(1)
-		go s.serveConnection(connection)
-	}
 }
 
 func (s *releaseRaceServer) serveConnection(connection net.Conn) {
