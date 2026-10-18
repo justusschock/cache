@@ -15,6 +15,7 @@ func (*nilCodec[T]) Decode([]byte) (T, error) {
 	return zero, nil
 }
 
+// FR-CACHE-22
 func TestNewRejectsNilPoolAndCodecs(t *testing.T) {
 	_, err := postgres.New[string, int](nil)
 	assert.ErrorIs(t, err, postgres.ErrNilPool)
@@ -30,6 +31,7 @@ func TestNewRejectsNilPoolAndCodecs(t *testing.T) {
 	assert.ErrorIs(t, err, postgres.ErrNilCodec)
 }
 
+// FR-CACHE-22
 func TestNewLockerRejectsNilPool(t *testing.T) {
 	_, err := postgres.NewLocker[string](nil)
 	assert.ErrorIs(t, err, postgres.ErrNilPool)
@@ -38,6 +40,7 @@ func TestNewLockerRejectsNilPool(t *testing.T) {
 	assert.ErrorIs(t, err, postgres.ErrNilCodec)
 }
 
+// FR-CACHE-22
 func TestNewInvalidationBusRejectsNilPoolAndCodec(t *testing.T) {
 	_, err := postgres.NewInvalidationBus[string](nil)
 	assert.ErrorIs(t, err, postgres.ErrNilPool)

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-15
 func TestInvalidationBusFiltersMismatchedNamespacePayloads(t *testing.T) {
 	address := os.Getenv("REDIS_ADDR")
 	if address == "" {
@@ -59,6 +60,7 @@ func TestInvalidationBusFiltersMismatchedNamespacePayloads(t *testing.T) {
 	}
 }
 
+// FR-CACHE-03, FR-CACHE-19
 func TestNoExpiryEntriesHaveNoNativeTTL(t *testing.T) {
 	address := os.Getenv("REDIS_ADDR")
 	if address == "" {

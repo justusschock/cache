@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-06, FR-CACHE-19
 func TestStoreIntegrationContract(t *testing.T) {
 	address := os.Getenv("MEMCACHED_ADDR")
 	if address == "" {
@@ -30,6 +31,7 @@ func TestStoreIntegrationContract(t *testing.T) {
 	})
 }
 
+// FR-CACHE-20
 func TestLockerIntegration(t *testing.T) {
 	address := os.Getenv("MEMCACHED_ADDR")
 	if address == "" {
@@ -47,6 +49,7 @@ func TestLockerIntegration(t *testing.T) {
 	require.NoError(t, lease.Release(context.Background()))
 }
 
+// FR-CACHE-19
 func TestStorePreservesSubsecondExpiry(t *testing.T) {
 	address := os.Getenv("MEMCACHED_ADDR")
 	if address == "" {
@@ -63,6 +66,7 @@ func TestStorePreservesSubsecondExpiry(t *testing.T) {
 	assert.Equal(t, entry.Value, got.Value)
 }
 
+// FR-CACHE-19
 func TestStorePreservesExpiryPast2038(t *testing.T) {
 	address := os.Getenv("MEMCACHED_ADDR")
 	if address == "" {

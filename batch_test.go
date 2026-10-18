@@ -77,6 +77,7 @@ func (shortBatchStore) GetMany(context.Context, string, []string) ([]cache.Entry
 	return nil, nil, nil
 }
 
+// FR-CACHE-03
 func TestNewAcceptsNoExpiryButRejectsOtherNonPositiveTTLs(t *testing.T) {
 	t.Parallel()
 
@@ -90,6 +91,7 @@ func TestNewAcceptsNoExpiryButRejectsOtherNonPositiveTTLs(t *testing.T) {
 	}
 }
 
+// FR-CACHE-03
 func TestNoExpiryEntriesNeverExpire(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newRecordingStore[string, int]()
@@ -115,6 +117,7 @@ func TestNoExpiryEntriesNeverExpire(t *testing.T) {
 	})
 }
 
+// FR-CACHE-03
 func TestSetWithTTLAcceptsNoExpiryOnExpiringCache(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newRecordingStore[string, int]()
@@ -137,6 +140,7 @@ func TestSetWithTTLAcceptsNoExpiryOnExpiringCache(t *testing.T) {
 	})
 }
 
+// FR-CACHE-03, FR-CACHE-04
 func TestSetEntryAcceptsNoExpiryAndRejectsExpiredEntries(t *testing.T) {
 	t.Parallel()
 
@@ -155,6 +159,7 @@ func TestSetEntryAcceptsNoExpiryAndRejectsExpiredEntries(t *testing.T) {
 	assert.ErrorIs(t, c.SetEntry(ctx, "expired", expired), cache.ErrInvalidTTL)
 }
 
+// FR-CACHE-03
 func TestEntryExpiration(t *testing.T) {
 	t.Parallel()
 
@@ -166,6 +171,7 @@ func TestEntryExpiration(t *testing.T) {
 	assert.False(t, cache.Entry[int]{ExpiresAt: now}.NeverExpires())
 }
 
+// FR-CACHE-05
 func TestBatchOperationsUseBatchStore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := newCountingBatchStore()
@@ -197,6 +203,7 @@ func TestBatchOperationsUseBatchStore(t *testing.T) {
 	})
 }
 
+// FR-CACHE-05
 func TestBatchOperationsFallBackToStoreLoop(t *testing.T) {
 	t.Parallel()
 
@@ -221,6 +228,7 @@ func TestBatchOperationsFallBackToStoreLoop(t *testing.T) {
 	assert.ErrorContains(t, c.SetMany(ctx, []string{"carol"}, []int{4}), "write failed")
 }
 
+// FR-CACHE-05
 func TestBatchOperationsValidateArguments(t *testing.T) {
 	t.Parallel()
 
@@ -248,6 +256,7 @@ func TestBatchOperationsValidateArguments(t *testing.T) {
 	assert.ErrorIs(t, c.InvalidateMany(canceled, []string{"alice"}), context.Canceled)
 }
 
+// FR-CACHE-05, FR-CACHE-22
 func TestBatchOperationsWrapStoreErrors(t *testing.T) {
 	t.Parallel()
 
@@ -263,6 +272,7 @@ func TestBatchOperationsWrapStoreErrors(t *testing.T) {
 	assert.ErrorIs(t, c.InvalidateMany(ctx, []string{"alice"}), store.err)
 }
 
+// FR-CACHE-05
 func TestGetManyRejectsMisalignedBatchStoreResults(t *testing.T) {
 	t.Parallel()
 
@@ -272,6 +282,7 @@ func TestGetManyRejectsMisalignedBatchStoreResults(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrBatchLength)
 }
 
+// FR-CACHE-05
 func TestBatchCacheWithMemoryStore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := memory.New[string, int]()

@@ -47,6 +47,7 @@ func (*nilClient) Dedicated(func(valkeyclient.DedicatedClient) error) error { re
 func (*nilClient) Dedicate() (valkeyclient.DedicatedClient, func())         { return nil, func() {} }
 func (*nilClient) Nodes() map[string]valkeyclient.Client                    { return nil }
 
+// FR-CACHE-22
 func TestNewRejectsNilClientAndCodecs(t *testing.T) {
 	_, err := valkeycache.New[string, int](nil)
 	assert.ErrorIs(t, err, valkeycache.ErrNilClient)
@@ -65,6 +66,7 @@ func TestNewRejectsNilClientAndCodecs(t *testing.T) {
 	assert.ErrorIs(t, err, valkeycache.ErrNilCodec)
 }
 
+// FR-CACHE-22
 func TestNewLockerRejectsNilClient(t *testing.T) {
 	_, err := valkeycache.NewLocker[string](nil)
 	assert.ErrorIs(t, err, valkeycache.ErrNilClient)
@@ -76,6 +78,7 @@ func TestNewLockerRejectsNilClient(t *testing.T) {
 	assert.ErrorIs(t, err, valkeycache.ErrNilCodec)
 }
 
+// FR-CACHE-22
 func TestNewInvalidationBusRejectsNilClientAndCodec(t *testing.T) {
 	_, err := valkeycache.NewInvalidationBus[string](nil)
 	assert.ErrorIs(t, err, valkeycache.ErrNilClient)

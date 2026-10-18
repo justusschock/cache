@@ -16,6 +16,7 @@ import (
 	valkeyclient "github.com/valkey-io/valkey-go"
 )
 
+// FR-CACHE-06, FR-CACHE-19
 func TestStoreIntegrationContract(t *testing.T) {
 	address := os.Getenv("VALKEY_ADDR")
 	if address == "" {
@@ -38,6 +39,7 @@ func TestStoreIntegrationContract(t *testing.T) {
 	})
 }
 
+// FR-CACHE-20
 func TestLockerIntegration(t *testing.T) {
 	address := os.Getenv("VALKEY_ADDR")
 	if address == "" {
@@ -57,6 +59,7 @@ func TestLockerIntegration(t *testing.T) {
 	require.NoError(t, lease.Release(context.Background()))
 }
 
+// FR-CACHE-15
 func TestInvalidationBusIntegration(t *testing.T) {
 	address := os.Getenv("VALKEY_ADDR")
 	if address == "" {

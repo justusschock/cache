@@ -159,6 +159,7 @@ func TestCacheDoesNotExposeExpiredOrNegativeEntries(t *testing.T) {
 	assert.Empty(t, value)
 }
 
+// FR-CACHE-22
 func TestCachePropagatesStoreErrors(t *testing.T) {
 	t.Parallel()
 

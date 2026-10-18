@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-06, FR-CACHE-19
 func TestStoreIntegrationContract(t *testing.T) {
 	address := os.Getenv("HAZELCAST_ADDR")
 	if address == "" {
@@ -35,6 +36,7 @@ func TestStoreIntegrationContract(t *testing.T) {
 	})
 }
 
+// FR-CACHE-15
 func TestInvalidationBusIntegration(t *testing.T) {
 	address := os.Getenv("HAZELCAST_ADDR")
 	if address == "" {

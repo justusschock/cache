@@ -16,6 +16,7 @@ type codecValue struct {
 
 type codecInt int64
 
+// FR-CACHE-13
 func TestDefaultCodecRoundTripsTypedValues(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -35,6 +36,7 @@ func TestDefaultCodecRoundTripsTypedValues(t *testing.T) {
 	}
 }
 
+// FR-CACHE-13
 func TestDefaultCodecUsesDirectRepresentations(t *testing.T) {
 	stringCodec := cache.DefaultCodec[string]()
 	encodedString, err := stringCodec.Encode("hello")
@@ -61,6 +63,7 @@ func TestDefaultCodecUsesDirectRepresentations(t *testing.T) {
 	assert.Equal(t, codecInt(-42), decodedInt)
 }
 
+// FR-CACHE-13
 func TestDefaultCodecRoundTripsPointersAndNil(t *testing.T) {
 	codec := cache.DefaultCodec[*codecValue]()
 	value := &codecValue{Name: "alice", Count: 42}
@@ -77,6 +80,7 @@ func TestDefaultCodecRoundTripsPointersAndNil(t *testing.T) {
 	assert.Nil(t, decoded)
 }
 
+// FR-CACHE-13
 func TestDefaultCodecRejectsUntypedDecode(t *testing.T) {
 	codec := cache.DefaultCodec[any]()
 	encoded, err := codec.Encode(codecValue{Name: "alice"})
@@ -90,6 +94,7 @@ type failingCodec struct{}
 func (failingCodec) Encode(string) ([]byte, error) { return nil, errors.New("encode failed") }
 func (failingCodec) Decode([]byte) (string, error) { return "", errors.New("decode failed") }
 
+// FR-CACHE-13
 func TestCodecInterfaceSupportsCustomImplementations(t *testing.T) {
 	var codec cache.Codec[string] = failingCodec{}
 	_, err := codec.Encode("value")

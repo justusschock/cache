@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-21
 func TestEntryRoundTripsExpiryOutsideUnixNanoRange(t *testing.T) {
 	encoder := New(cache.DefaultCodec[string](), cache.DefaultCodec[int]())
 	expiresAt := time.Date(2500, time.January, 2, 3, 4, 5, 678_901_234, time.UTC)
@@ -23,6 +24,7 @@ func TestEntryRoundTripsExpiryOutsideUnixNanoRange(t *testing.T) {
 	assert.Equal(t, entry, decoded)
 }
 
+// FR-CACHE-21
 func TestDecodeAcceptsVersionOneEntry(t *testing.T) {
 	encoder := New(cache.DefaultCodec[string](), cache.DefaultCodec[int]())
 	expiresAt := time.Date(2030, time.January, 2, 3, 4, 5, 6, time.UTC)
@@ -42,6 +44,7 @@ func TestDecodeAcceptsVersionOneEntry(t *testing.T) {
 	assert.Equal(t, 42, decoded.Value)
 }
 
+// FR-CACHE-21
 func TestDecodeRejectsMalformedVersionTwoNanoseconds(t *testing.T) {
 	encoder := New(cache.DefaultCodec[string](), cache.DefaultCodec[int]())
 	for _, nanoseconds := range []uint32{uint32(time.Second), ^uint32(0)} {

@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-21
 func TestInvalidationRoundTrip(t *testing.T) {
 	event := cache.InvalidationEvent[string]{
 		Namespace:  "users",
@@ -24,6 +25,7 @@ func TestInvalidationRoundTrip(t *testing.T) {
 	assert.Equal(t, event, decoded)
 }
 
+// FR-CACHE-21
 func TestNamespaceInvalidationRoundTrip(t *testing.T) {
 	event := cache.InvalidationEvent[int]{Namespace: "users", Kind: cache.InvalidateNamespace}
 	encoded, err := wire.EncodeInvalidation(event, cache.DefaultCodec[int]())
@@ -34,6 +36,7 @@ func TestNamespaceInvalidationRoundTrip(t *testing.T) {
 	assert.Equal(t, event, decoded)
 }
 
+// FR-CACHE-21
 func TestInvalidationRejectsMalformedPayload(t *testing.T) {
 	_, err := wire.DecodeInvalidation([]byte("invalid"), cache.DefaultCodec[string]())
 	assert.Error(t, err)

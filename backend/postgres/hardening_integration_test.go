@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-19
 func TestSetRechecksExpiryWithServerClockAfterLockWait(t *testing.T) {
 	databaseURL := os.Getenv("POSTGRES_URL")
 	if databaseURL == "" {
@@ -60,6 +61,7 @@ func TestSetRechecksExpiryWithServerClockAfterLockWait(t *testing.T) {
 	assert.Zero(t, count)
 }
 
+// FR-CACHE-19
 func TestDeleteExpiredRemovesHighCardinalityLockRows(t *testing.T) {
 	databaseURL := os.Getenv("POSTGRES_URL")
 	if databaseURL == "" {

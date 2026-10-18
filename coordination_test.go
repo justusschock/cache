@@ -49,6 +49,7 @@ func (l *coordinationLease) Release(context.Context) error {
 	return nil
 }
 
+// FR-CACHE-12, FR-CACHE-22
 func TestNewCoordinationLockerRejectsInvalidConfiguration(t *testing.T) {
 	key := func(string, string) (string, error) { return "key", nil }
 	backend := &coordinationBackend{}
@@ -61,6 +62,7 @@ func TestNewCoordinationLockerRejectsInvalidConfiguration(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrNilFillKeyFunc)
 }
 
+// FR-CACHE-12
 func TestCoordinationLockerMapsLeaseOperations(t *testing.T) {
 	underlying := &coordinationLease{done: make(chan struct{})}
 	backend := &coordinationBackend{lease: underlying}
@@ -86,6 +88,7 @@ func TestCoordinationLockerMapsLeaseOperations(t *testing.T) {
 	assert.True(t, underlying.released)
 }
 
+// FR-CACHE-12
 func TestCoordinationLockerMapsContention(t *testing.T) {
 	backend := &coordinationBackend{err: coordination.ErrNotAcquired}
 	locker, err := cache.NewCoordinationLocker(
@@ -99,6 +102,7 @@ func TestCoordinationLockerMapsContention(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrLockNotAcquired)
 }
 
+// FR-CACHE-12
 func TestCoordinationLockerWorksWithMemoryBackend(t *testing.T) {
 	backend := coordinationmemory.NewBackend(nil)
 	locker, err := cache.NewCoordinationLocker(
@@ -123,6 +127,7 @@ func TestCoordinationLockerWorksWithMemoryBackend(t *testing.T) {
 	require.NoError(t, second.Release(context.Background()))
 }
 
+// FR-CACHE-12
 func TestCoordinationLockerPreservesKeyErrors(t *testing.T) {
 	wantErr := errors.New("cannot encode key")
 	locker, err := cache.NewCoordinationLocker(

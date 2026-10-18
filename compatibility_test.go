@@ -31,6 +31,7 @@ var _ cache.Store[string, int] = compatibilityStore{}
 var _ cache.Cache[string, int] = (*cache.StandardCache[string, int])(nil)
 var _ cache.EntryCache[string, int] = (*cache.StandardCache[string, int])(nil)
 
+// FR-CACHE-01
 func TestExistingConstructorsRemainCallable(t *testing.T) {
 	standard, err := cache.New("compat", time.Minute, compatibilityStore{})
 	require.NoError(t, err)

@@ -17,6 +17,7 @@ func (*nilCodec[T]) Decode([]byte) (T, error) {
 	return zero, nil
 }
 
+// FR-CACHE-22
 func TestNewRejectsNilClientAndCodecs(t *testing.T) {
 	_, err := rediscache.New[string, int](nil)
 	assert.ErrorIs(t, err, rediscache.ErrNilClient)
@@ -36,6 +37,7 @@ func TestNewRejectsNilClientAndCodecs(t *testing.T) {
 	assert.ErrorIs(t, err, rediscache.ErrNilCodec)
 }
 
+// FR-CACHE-22
 func TestNewLockerRejectsNilClientAndCodec(t *testing.T) {
 	_, err := rediscache.NewLocker[string](nil)
 	assert.ErrorIs(t, err, rediscache.ErrNilClient)
@@ -49,6 +51,7 @@ func TestNewLockerRejectsNilClientAndCodec(t *testing.T) {
 	assert.ErrorIs(t, err, rediscache.ErrNilCodec)
 }
 
+// FR-CACHE-22
 func TestNewInvalidationBusRejectsNilClientAndCodec(t *testing.T) {
 	_, err := rediscache.NewInvalidationBus[string](nil)
 	assert.ErrorIs(t, err, rediscache.ErrNilClient)

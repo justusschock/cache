@@ -68,6 +68,7 @@ func (*nilSubscriber) Subscribe(context.Context, messaging.Subscription, messagi
 	return nil
 }
 
+// FR-CACHE-22
 func TestConstructorsRejectTypedNilDependencies(t *testing.T) {
 	var store *nilStore
 	_, err := cache.New("users", time.Minute, cache.Store[string, int](store))

@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-06, FR-CACHE-19
 func TestStoreIntegrationContract(t *testing.T) {
 	databaseURL := os.Getenv("POSTGRES_URL")
 	if databaseURL == "" {
@@ -35,6 +36,7 @@ func TestStoreIntegrationContract(t *testing.T) {
 	})
 }
 
+// FR-CACHE-20
 func TestLockerIntegration(t *testing.T) {
 	databaseURL := os.Getenv("POSTGRES_URL")
 	if databaseURL == "" {
@@ -57,6 +59,7 @@ func TestLockerIntegration(t *testing.T) {
 	require.NoError(t, lease.Release(context.Background()))
 }
 
+// FR-CACHE-20
 func TestLockerReleaseRejectsNaturalExpiry(t *testing.T) {
 	databaseURL := os.Getenv("POSTGRES_URL")
 	if databaseURL == "" {
@@ -77,6 +80,7 @@ func TestLockerReleaseRejectsNaturalExpiry(t *testing.T) {
 	assert.ErrorIs(t, lease.Release(context.Background()), cache.ErrLeaseLost)
 }
 
+// FR-CACHE-15
 func TestInvalidationBusIntegration(t *testing.T) {
 	databaseURL := os.Getenv("POSTGRES_URL")
 	if databaseURL == "" {

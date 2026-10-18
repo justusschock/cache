@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-06, FR-CACHE-19
 func TestStoreIntegrationContract(t *testing.T) {
 	address := os.Getenv("REDIS_ADDR")
 	if address == "" {
@@ -39,6 +40,7 @@ func TestStoreIntegrationContract(t *testing.T) {
 	})
 }
 
+// FR-CACHE-20
 func TestLockerIntegration(t *testing.T) {
 	address := os.Getenv("REDIS_ADDR")
 	if address == "" {
@@ -62,6 +64,7 @@ func TestLockerIntegration(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+// FR-CACHE-15
 func TestInvalidationBusIntegration(t *testing.T) {
 	address := os.Getenv("REDIS_ADDR")
 	if address == "" {

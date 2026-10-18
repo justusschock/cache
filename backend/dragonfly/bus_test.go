@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// FR-CACHE-15
 func TestSubscribeRejectsNilHandler(t *testing.T) {
 	bus := &InvalidationBus[string]{}
 	var err error

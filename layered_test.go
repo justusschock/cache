@@ -104,6 +104,7 @@ func (b *recordingInvalidationBus[K]) Subscribe(
 	return nil
 }
 
+// FR-CACHE-07
 func TestLayeredGetPromotesLowerHitWithoutChangingExpiration(t *testing.T) {
 	log := &layerLog{}
 	fast := newLayerStore("fast", log)
@@ -123,6 +124,7 @@ func TestLayeredGetPromotesLowerHitWithoutChangingExpiration(t *testing.T) {
 	assert.Equal(t, []string{"get:fast", "get:middle", "get:slow", "set:fast", "set:middle"}, log.snapshot())
 }
 
+// FR-CACHE-07
 func TestLayeredSetWritesSlowestToFastest(t *testing.T) {
 	log := &layerLog{}
 	fast := newLayerStore("fast", log)
@@ -136,6 +138,7 @@ func TestLayeredSetWritesSlowestToFastest(t *testing.T) {
 	assert.Equal(t, []string{"set:slow", "set:middle", "set:fast"}, log.snapshot())
 }
 
+// FR-CACHE-07
 func TestLayeredSetStopsWhenSlowestLayerFails(t *testing.T) {
 	log := &layerLog{}
 	fast := newLayerStore("fast", log)
@@ -149,6 +152,7 @@ func TestLayeredSetStopsWhenSlowestLayerFails(t *testing.T) {
 	assert.Equal(t, []string{"set:slow"}, log.snapshot())
 }
 
+// FR-CACHE-07
 func TestLayeredSetJoinsUpperLayerErrors(t *testing.T) {
 	log := &layerLog{}
 	fast := newLayerStore("fast", log)
@@ -167,6 +171,7 @@ func TestLayeredSetJoinsUpperLayerErrors(t *testing.T) {
 	assert.Equal(t, []string{"set:slow", "set:middle", "set:fast"}, log.snapshot())
 }
 
+// FR-CACHE-14
 func TestLayeredPublishesExactInvalidationScopes(t *testing.T) {
 	bus := &recordingInvalidationBus[string]{}
 	layered, err := cache.NewLayeredWithInvalidationBus(
@@ -187,6 +192,7 @@ func TestLayeredPublishesExactInvalidationScopes(t *testing.T) {
 	}, bus.events)
 }
 
+// FR-CACHE-14
 func TestListenerTreatsDuplicateAndOutOfOrderEventsAsEvictions(t *testing.T) {
 	log := &layerLog{}
 	upper := newLayerStore("upper", log)
@@ -212,6 +218,7 @@ func TestListenerTreatsDuplicateAndOutOfOrderEventsAsEvictions(t *testing.T) {
 	assert.True(t, bobPresent)
 }
 
+// FR-CACHE-08
 func TestLayeredReadCanFailOpenOrStrict(t *testing.T) {
 	log := &layerLog{}
 	fast := newLayerStore("fast", log)
@@ -242,6 +249,7 @@ func TestLayeredReadCanFailOpenOrStrict(t *testing.T) {
 	assert.ErrorIs(t, err, fastErr)
 }
 
+// FR-CACHE-08, FR-CACHE-22
 func TestLayeredTreatsTypedNilOptionalObserverAsAbsent(t *testing.T) {
 	log := &layerLog{}
 	fast := newLayerStore("fast", log)
@@ -265,6 +273,7 @@ func TestLayeredTreatsTypedNilOptionalObserverAsAbsent(t *testing.T) {
 	assert.Equal(t, "value", entry.Value)
 }
 
+// FR-CACHE-07
 func TestLayeredInvalidationAttemptsEveryLayerAndJoinsErrors(t *testing.T) {
 	log := &layerLog{}
 	fast := newLayerStore("fast", log)
@@ -283,6 +292,7 @@ func TestLayeredInvalidationAttemptsEveryLayerAndJoinsErrors(t *testing.T) {
 	assert.Equal(t, []string{"invalidate:fast", "invalidate:middle", "invalidate:slow"}, log.snapshot())
 }
 
+// FR-CACHE-07
 func TestLayeredInvalidateAllAttemptsEveryLayer(t *testing.T) {
 	log := &layerLog{}
 	fast := newLayerStore("fast", log)
@@ -297,6 +307,7 @@ func TestLayeredInvalidateAllAttemptsEveryLayer(t *testing.T) {
 	assert.Equal(t, []string{"all:fast", "all:slow"}, log.snapshot())
 }
 
+// FR-CACHE-07, FR-CACHE-22
 func TestNewLayeredRejectsMissingOrNilLayers(t *testing.T) {
 	_, err := cache.NewLayered[string, string](nil)
 	assert.ErrorIs(t, err, cache.ErrNoLayers)

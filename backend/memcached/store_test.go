@@ -15,6 +15,7 @@ func (*nilCodec[T]) Decode([]byte) (T, error) {
 	return zero, nil
 }
 
+// FR-CACHE-22
 func TestNewRejectsNilClientAndCodecs(t *testing.T) {
 	_, err := memcached.New[string, int](nil)
 	assert.ErrorIs(t, err, memcached.ErrNilClient)
@@ -30,6 +31,7 @@ func TestNewRejectsNilClientAndCodecs(t *testing.T) {
 	assert.ErrorIs(t, err, memcached.ErrNilCodec)
 }
 
+// FR-CACHE-22
 func TestNewLockerRejectsNilClient(t *testing.T) {
 	_, err := memcached.NewLocker[string](nil)
 	assert.ErrorIs(t, err, memcached.ErrNilClient)

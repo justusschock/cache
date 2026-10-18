@@ -25,6 +25,7 @@ func (*nilCodec[T]) Decode([]byte) (T, error) {
 	return zero, nil
 }
 
+// FR-CACHE-06, FR-CACHE-18
 func TestStoreContract(t *testing.T) {
 	cachetest.RunStoreContract(t, func(t *testing.T) cache.Store[string, int] {
 		store, err := disk.Open[string, int](filepath.Join(t.TempDir(), "cache.db"))
@@ -36,6 +37,7 @@ func TestStoreContract(t *testing.T) {
 	})
 }
 
+// FR-CACHE-18
 func TestStorePersistsAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.db")
 	entry := cache.Entry[int]{Value: 42, Found: true, ExpiresAt: time.Now().Add(time.Minute).Round(0)}
@@ -58,6 +60,7 @@ func TestStorePersistsAcrossReopen(t *testing.T) {
 	assert.True(t, entry.ExpiresAt.Equal(got.ExpiresAt))
 }
 
+// FR-CACHE-18, NFR-CACHE-08
 func TestStoreFileIsOwnerOnly(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.db")
 	store, err := disk.Open[string, int](path)
@@ -69,6 +72,7 @@ func TestStoreFileIsOwnerOnly(t *testing.T) {
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
 }
 
+// FR-CACHE-22
 func TestOpenRejectsEmptyPathAndNilCodecs(t *testing.T) {
 	_, err := disk.Open[string, int]("")
 	assert.ErrorIs(t, err, disk.ErrEmptyPath)
@@ -94,24 +98,28 @@ func openStore(t *testing.T, options ...disk.Option[string, int]) *disk.Store[st
 	return store
 }
 
+// FR-CACHE-06, FR-CACHE-18
 func TestOrderedStoreContract(t *testing.T) {
 	cachetest.RunStoreContract(t, func(t *testing.T) cache.Store[string, int] {
 		return openStore(t, disk.WithOrderedKeys[string, int]())
 	})
 }
 
+// FR-CACHE-05, FR-CACHE-18
 func TestBatchStoreContract(t *testing.T) {
 	cachetest.RunBatchStoreContract(t, func(t *testing.T) cache.BatchStore[string, int] {
 		return openStore(t)
 	})
 }
 
+// FR-CACHE-05, FR-CACHE-18
 func TestOrderedBatchStoreContract(t *testing.T) {
 	cachetest.RunBatchStoreContract(t, func(t *testing.T) cache.BatchStore[string, int] {
 		return openStore(t, disk.WithOrderedKeys[string, int]())
 	})
 }
 
+// FR-CACHE-03, FR-CACHE-18
 func TestStoreExpiresEntriesButKeepsNoExpiryEntries(t *testing.T) {
 	for name, options := range map[string][]disk.Option[string, int]{
 		"hashed":  nil,
@@ -141,6 +149,7 @@ func TestStoreExpiresEntriesButKeepsNoExpiryEntries(t *testing.T) {
 	}
 }
 
+// FR-CACHE-03, FR-CACHE-18
 func TestStoreNoExpiryPersistsAcrossReopen(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.db")
 	first, err := disk.Open[string, int](path)
@@ -158,6 +167,7 @@ func TestStoreNoExpiryPersistsAcrossReopen(t *testing.T) {
 	assert.True(t, got.ExpiresAt.IsZero())
 }
 
+// FR-CACHE-18
 func TestOrderedKeysUseSeparateLayout(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "cache.db")
 	hashed, err := disk.Open[string, int](path)
@@ -188,6 +198,7 @@ func scanAll(t *testing.T, store *disk.Store[string, int], namespace string, pre
 	return got
 }
 
+// FR-CACHE-18
 func TestScanPrefixVisitsLiveEntriesInKeyOrder(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := openStore(t, disk.WithOrderedKeys[string, int]())
@@ -221,6 +232,7 @@ func TestScanPrefixVisitsLiveEntriesInKeyOrder(t *testing.T) {
 	})
 }
 
+// FR-CACHE-18
 func TestScanPrefixStopsWhenCallbackReturnsFalse(t *testing.T) {
 	store := openStore(t, disk.WithOrderedKeys[string, int]())
 	ctx := context.Background()
@@ -236,6 +248,7 @@ func TestScanPrefixStopsWhenCallbackReturnsFalse(t *testing.T) {
 	assert.Equal(t, []string{"a1", "a2"}, visited)
 }
 
+// FR-CACHE-18
 func TestScanPrefixSkipsEntriesBeforeInvalidateAll(t *testing.T) {
 	store := openStore(t, disk.WithOrderedKeys[string, int]())
 	ctx := context.Background()
@@ -246,6 +259,7 @@ func TestScanPrefixSkipsEntriesBeforeInvalidateAll(t *testing.T) {
 	assert.Equal(t, []scanned{{"b", 2}}, scanAll(t, store, "files", ""))
 }
 
+// FR-CACHE-18
 func TestDeletePrefixRemovesMatchingRecords(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store := openStore(t, disk.WithOrderedKeys[string, int]())
@@ -286,6 +300,7 @@ func TestDeletePrefixRemovesMatchingRecords(t *testing.T) {
 	})
 }
 
+// FR-CACHE-18
 func TestPrefixOperationsRequireOrderedKeys(t *testing.T) {
 	store := openStore(t)
 	err := store.ScanPrefix(context.Background(), "files", nil, func(string, cache.Entry[int]) bool { return true })
@@ -294,6 +309,7 @@ func TestPrefixOperationsRequireOrderedKeys(t *testing.T) {
 	assert.ErrorIs(t, err, disk.ErrOrderedKeysRequired)
 }
 
+// FR-CACHE-18
 func TestPrefixOperationsValidateArguments(t *testing.T) {
 	store := openStore(t, disk.WithOrderedKeys[string, int]())
 	assert.ErrorIs(t, store.ScanPrefix(context.Background(), "files", nil, nil), disk.ErrNilScanFunc)
@@ -323,6 +339,7 @@ func (pathCodec) Decode(encoded []byte) (fileKey, error) {
 	return fileKey{Dir: dir, Name: name}, nil
 }
 
+// FR-CACHE-18
 func TestScanPrefixWithCustomKeyCodec(t *testing.T) {
 	store, err := disk.Open(
 		filepath.Join(t.TempDir(), "cache.db"),

@@ -16,6 +16,7 @@ func (*nilCodec[T]) Decode([]byte) (T, error) {
 	return zero, nil
 }
 
+// FR-CACHE-22
 func TestNewRejectsInvalidConfiguration(t *testing.T) {
 	_, err := hazelcastcache.New[string, int](context.Background(), nil)
 	assert.ErrorIs(t, err, hazelcastcache.ErrNilClient)
@@ -31,6 +32,7 @@ func TestNewRejectsInvalidConfiguration(t *testing.T) {
 	assert.ErrorIs(t, err, hazelcastcache.ErrNilCodec)
 }
 
+// FR-CACHE-22
 func TestNewInvalidationBusRejectsNilClientAndCodec(t *testing.T) {
 	_, err := hazelcastcache.NewInvalidationBus[string](context.Background(), nil)
 	assert.ErrorIs(t, err, hazelcastcache.ErrNilClient)

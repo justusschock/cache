@@ -1,28 +1,53 @@
 # go-cache
 
-`go-cache` provides typed, composable caches for Go: bounded in-process storage, layered promotion, pull-through loading, negative entries, renewable fill leases, and transport-neutral invalidation.
+go-cache provides typed, composable caches for Go: one generic storage
+contract with in-process, on-disk and remote backends, layered stores with
+promotion, pull-through loading with single flight and negative caching,
+renewable distributed fill leases, and transport-neutral invalidation between
+processes. It is for Go services and tools that want caching without
+hand-rolling stampede protection, expiry handling and cross-process
+invalidation for each storage technology. Cached data is assumed to be
+reconstructible and disposable; correctness-critical state belongs in a
+durable system of record.
 
-The repository is private and requires Go 1.25 or newer. Cache data is assumed to be reconstructible and disposable; correctness-critical state belongs in a durable system of record.
+## Features
+
+- Typed `Cache[K, V]` and `Store[K, V]` contracts with namespaces, default
+  and per-write TTLs, negative entries and explicit never-expiring entries
+  (`NoExpiry`).
+- Batch reads, writes and invalidations (`BatchCache`, `BatchStore`), one
+  round trip or transaction where the backend supports it.
+- `LayeredStore`: fastest-to-slowest layers with promotion that preserves
+  expiration, fail-open or strict reads, and an `Observer` hook.
+- `PullThroughCache`: per-key single flight with waiter-scoped cancellation,
+  negative caching, loader-panic recovery, and optional distributed fill
+  leases.
+- Distributed invalidation through any `InvalidationBus`, with adapters for
+  go-messaging and go-distributed-coordination.
+- Backends: bounded in-process LRU, bbolt file with ordered prefix scans,
+  Redis, Valkey, Dragonfly, Memcached, Hazelcast and PostgreSQL.
+- `cachetest`: public conformance suites for your own stores and
+  invalidation buses.
 
 ## Installation
 
-Configure private-module access and authenticate GitHub through your normal Git credential flow:
-
-```bash
-go env -w GOPRIVATE='github.com/justusschock/*'
-go env -w GONOSUMDB='github.com/justusschock/*'
-go get github.com/justusschock/go-cache@v0.3.0
+```sh
+go get github.com/justusschock/go-cache@latest
 ```
 
-The module depends on `go-concurrency`, `go-messaging`, and `go-distributed-coordination` at the matching `v0.2.0` compatibility line. All backend packages share this module and release, so one repository tag versions the complete library. Remote-client dependencies appear in the module graph, but Go compiles only packages imported by an application.
+Requires Go 1.25 or newer. The root package and every backend are one
+module; an application compiles only the backend packages it imports.
 
-## Basic use
+## Quick start
+
+This is the package `Example` in [example_test.go](example_test.go):
 
 ```go
 package main
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	cache "github.com/justusschock/go-cache"
@@ -36,7 +61,7 @@ type User struct {
 
 func main() {
 	store := memory.New[string, User]()
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	users, err := cache.New("users", 5*time.Minute, store)
 	if err != nil {
@@ -48,94 +73,89 @@ func main() {
 		panic(err)
 	}
 	user, found, err := users.Get(ctx, "user-42")
-	_, _, _ = user, found, err
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(found, user.Name) // true Ada
 }
 ```
 
-`memory.New` is globally bounded to 10,000 live entries and sweeps expired entries once per minute. Use `memory.NewWithOptions` to choose both limits explicitly:
+`memory.New` is bounded to 10,000 live entries and sweeps expired entries
+once per minute; `memory.NewWithOptions` sets both limits. The store uses one
+least-recently-used order across namespaces. Every memory store must be
+closed, because construction starts the sweeper goroutine.
 
 ```go
 store, err := memory.NewWithOptions[string, User](memory.Options{
-	MaxEntries:     50_000,
+	MaxEntries:      50_000,
 	CleanupInterval: 15 * time.Second,
 })
-if err != nil {
-	return err
-}
-defer store.Close()
 ```
 
-The store uses a global least-recently-used order across namespaces. Reads refresh recency, expiration and invalidation remove entries from the order, and `Close` is idempotent. Every memory store must be closed: construction starts an expiration-sweeper goroutine, and omitting `Close` leaves that goroutine running for the lifetime of the process.
+### Entries without expiration
 
-## Entries without expiration
-
-TTLs must be positive, with one explicit opt-in: `cache.NoExpiry`. Passing it to `New` makes `Set` and `SetMany` write entries that never expire; passing it to `SetWithTTL` or `SetManyWithTTL` does the same for individual writes on an otherwise expiring cache. Any other zero or negative TTL is still rejected with `ErrInvalidTTL`.
+TTLs must be positive, with one explicit opt-in: `cache.NoExpiry`. Passed to
+`New`, it makes `Set` and `SetMany` write entries that never expire; passed
+to `SetWithTTL` or `SetManyWithTTL`, it does the same for one write. Any other
+zero or negative TTL is rejected with `ErrInvalidTTL`.
 
 ```go
 hashes, err := cache.New("file-hashes", cache.NoExpiry, store)
-if err != nil {
-	return err
-}
 err = hashes.Set(ctx, "src/main.go", digest)
 
 // Or keep a default TTL and opt out per write:
 err = sessions.SetWithTTL(ctx, "pinned", session, cache.NoExpiry)
 ```
 
-A no-expiry entry carries a zero `Entry.ExpiresAt`; `Entry.NeverExpires` and `Entry.Expired(now)` encode that rule. Every backend keeps such entries until they are invalidated, replaced, or evicted by the backend's own capacity policy: memory never sweeps them, Redis, Valkey, Dragonfly, and Hazelcast write them without a native TTL, Memcached uses expiration `0`, and PostgreSQL stores `expires_at = 'infinity'`. `SetEntry` accepts a zero `ExpiresAt` so entries read through `GetEntry` can be written back unchanged.
+A never-expiring entry has a zero `Entry.ExpiresAt` (`Entry.NeverExpires`).
+Backends keep it until it is invalidated, replaced or evicted by the
+backend's own capacity policy: memory never sweeps it, Redis, Valkey,
+Dragonfly and Hazelcast write it without a native TTL, Memcached uses
+expiration `0`, and PostgreSQL stores `expires_at = 'infinity'`.
 
-## Batch operations
+### Batch operations
 
-`StandardCache` implements `BatchCache`, which adds `GetMany`, `SetMany`, `SetManyWithTTL`, and `InvalidateMany`. Results are aligned with the key slice, value slices must have the same length (`ErrBatchLength` otherwise), and a later duplicate key wins.
+`StandardCache` implements `BatchCache`: `GetMany`, `SetMany`,
+`SetManyWithTTL` and `InvalidateMany`. Results are aligned with the key
+slice, value slices must have the same length (`ErrBatchLength` otherwise),
+and a later duplicate key wins.
 
 ```go
-paths := []string{"src/a.go", "src/b.go", "src/c.go"}
-digests, found, err := hashes.GetMany(ctx, paths)
-if err != nil {
-	return err
-}
-for index, path := range paths {
-	if !found[index] {
-		// compute and collect the missing digest
-	}
-	_ = digests[index]
-}
+digests, found, err := hashes.GetMany(ctx, []string{"src/a.go", "src/b.go"})
 err = hashes.SetMany(ctx, changedPaths, changedDigests)
 ```
 
-When the underlying store implements the optional `BatchStore` interface, each batch call becomes one store call; otherwise the cache falls back to one `Get`, `Set`, or `Invalidate` per key and stops at the first error. The disk store runs every batch in a single bbolt transaction, which applies the batch atomically and costs one commit instead of one per key. The memory store applies a batch under one lock acquisition. Redis, Dragonfly, and Valkey pipeline a batch into one round trip; those pipelines are not transactions, so a failed call can leave part of a batch applied. Other stores use the fallback.
+When the store implements `BatchStore`, each call is one store call;
+otherwise the cache falls back to one call per key and stops at the first
+error. The disk store applies a batch in one bbolt transaction (atomic, one
+commit); the memory store under one lock; Redis, Valkey and Dragonfly in one
+pipeline, which is not a transaction, so a failed call can leave part of a
+batch applied.
 
-## Layered caches
+### Layered caches
 
-Stores are ordered from fastest to slowest. A lower-layer hit is promoted into every missed upper layer without changing its expiration. Writes start at the slowest layer, then proceed toward the fastest layer.
+Stores are ordered from fastest to slowest. A lower-layer hit is promoted
+into every faster layer that missed, without changing its expiration. Writes
+go to the slowest layer first.
 
 ```go
-fast := memory.New[string, User]()
-defer fast.Close()
-shared := memory.New[string, User]()
-defer shared.Close()
-
-layers, err := cache.NewLayered([]cache.Store[string, User]{fast, shared})
-if err != nil {
-	return err
-}
+layers, err := cache.NewLayered([]cache.Store[string, User]{local, shared})
 users, err := cache.New("users", 5*time.Minute, layers)
 ```
 
-Reads fail open by default: a failed upper layer is reported through an optional `Observer`, and lookup continues below it. `cache.WithStrictLayerReads()` makes the first layer error terminal. A slowest-layer write failure stops the write; errors from upper-layer writes are joined.
+Reads fail open by default: a failing layer is reported to the optional
+`Observer` (`cache.WithLayerObserver`) and lookup continues below it;
+`cache.WithStrictLayerReads()` makes the first layer error terminal. A
+slowest-layer write failure stops the write; faster-layer failures are joined.
 
-## Pull-through loading
+### Pull-through loading
 
-`NewPullThrough` shares one typed future per key. Each caller waits with its own context, so canceling a waiter does not cancel a fill needed by other callers. When the last waiter departs, the fill context is canceled and the flight is removed; a later request starts a fresh fill lifecycle even if the abandoned loader has not returned yet. Loader errors are never cached.
+`NewPullThrough` loads misses with one shared load per key. Each caller waits
+with its own context, so canceling one waiter does not cancel a load other
+callers need; when the last waiter leaves, the load is canceled and a later
+request starts afresh. Loader errors are never cached.
 
 ```go
-store := memory.New[string, User]()
-defer store.Close()
-users, err := cache.New("users", 5*time.Minute, store)
-if err != nil {
-	return err
-}
-
 loaded, err := cache.NewPullThrough(
 	"users",
 	users,
@@ -144,17 +164,16 @@ loaded, err := cache.NewPullThrough(
 	},
 	cache.WithNegativeTTL[string](30*time.Second),
 )
-if err != nil {
-	return err
-}
+user, found, err := loaded.Get(ctx, "user-42")
 ```
 
-Authoritative misses are stored as `Entry.Found == false` only when the wrapped cache implements `EntryCache`; `StandardCache` does. A custom implementation of only `Cache` remains supported, but misses are loaded again rather than retained in hidden process-local state.
+Authoritative misses (`found == false`) are stored as negative entries only
+when the wrapped cache implements `EntryCache`, as `StandardCache` does.
 
-For cross-process fill coordination, adapt any `go-distributed-coordination` backend:
+For cross-process fill coordination, pass a `Locker`: a backend locker, or
+any go-distributed-coordination backend through `NewCoordinationLocker`.
 
 ```go
-coordinationBackend := coordinationmemory.NewBackend(nil)
 locker, err := cache.NewCoordinationLocker(
 	coordinationBackend,
 	"worker-7",
@@ -163,35 +182,28 @@ locker, err := cache.NewCoordinationLocker(
 		return string(encoded), err
 	},
 )
-if err != nil {
-	return err
-}
-
-loaded, err := cache.NewPullThrough(
-	"users",
-	users,
-	loadUser,
-	cache.WithLocker[string](locker, 10*time.Second),
-)
+loaded, err := cache.NewPullThrough("users", users, loadUser,
+	cache.WithLocker[string](locker, 10*time.Second))
 ```
 
-`FillKeyFunc` is part of the coordination schema. Its output must be deterministic and injective over the complete `(namespace, key)` tuple. Delimiter concatenation is unsafe when either input may contain the delimiter because different tuples can map to the same lease. Keep the derivation stable across deployments and align its key semantics with the cache key codec.
+The `FillKeyFunc` must be deterministic and injective over the whole
+`(namespace, key)` tuple; concatenating with a delimiter is unsafe when either
+part may contain it. Leases are refreshed every half TTL. Observed lease loss
+or a failed refresh cancels the loader, waits for it, skips the cache write
+if it has not started, and returns `ErrFillLeaseLost`; the lease is released
+on a non-canceled context. Loaders and caches used with leases must honour
+cancellation. Leases reduce duplicate fills; they do not fence writes.
 
-Observable lease loss or renewal failure cancels the loader, waits for it to return, and releases the lease with a non-canceled context. Loss detected before storage prevents the cache write from starting. If ownership changes while `Cache.Set` is already running, the write receives a canceled context and `Get` returns `ErrFillLeaseLost`, but the `Cache` interface cannot fence an implementation that has already committed or ignores cancellation. Loaders and cache implementations used with leases must honor context cancellation. These leases reduce duplicate fills; they are not a substitute for fenced writes in a correctness-critical data store.
+### Distributed invalidation
 
-## Distributed invalidation
-
-`LayeredStore` can publish typed invalidations through any `InvalidationBus`. `Set` and `Invalidate` publish a key-scoped event; `InvalidateAll` publishes a namespace-scoped event. Listeners only evict upper layers, making duplicate and out-of-order delivery safe. `InvalidationEvent.Generation` is transport metadata, not a globally ordered revision.
-
-`MessagingInvalidationBus` adapts typed `go-messaging` publishers and subscribers:
+A `LayeredStore` built with `NewLayeredWithInvalidationBus` publishes a
+key-scoped event for `Set` and `Invalidate` and a namespace-scoped event for
+`InvalidateAll`. `ListenInvalidations` applies remote events by evicting only
+the layers above the shared layer, so duplicate and out-of-order delivery is
+safe. `InvalidationEvent.Generation` is transport metadata, not an ordering.
 
 ```go
-broker := messagingmemory.NewBroker[cache.InvalidationEvent[string]](10 * time.Millisecond)
-defer broker.Close()
-
-bus, err := cache.NewMessagingInvalidationBus[string](
-	broker,
-	broker,
+bus, err := cache.NewMessagingInvalidationBus[string](publisher, subscriber,
 	func(namespace string) messaging.Subscription {
 		return messaging.Subscription{
 			Subject:     "cache.invalidations." + namespace,
@@ -199,125 +211,145 @@ bus, err := cache.NewMessagingInvalidationBus[string](
 			Semantics:   messaging.AtLeastOnce,
 			MaxInFlight: 32,
 		}
-	},
-)
-if err != nil {
-	return err
-}
-
+	})
 layers, err := cache.NewLayeredWithInvalidationBus(
-	[]cache.Store[string, User]{local, shared},
-	bus,
-)
-if err != nil {
-	return err
-}
+	[]cache.Store[string, User]{local, shared}, bus)
 
-listenCtx, stop := context.WithCancel(ctx)
-defer stop()
-go func() {
-	_ = layers.ListenInvalidations(listenCtx, "users", 1)
-}()
+go func() { _ = layers.ListenInvalidations(listenCtx, "users", 1) }()
 ```
 
-`SubscriptionFactory` is also the source of the publish subject, so it must return a stable subject for each namespace. `Subscribe` follows the messaging lifetime contract and normally blocks until its context ends. Successfully handled and namespace-mismatched deliveries are acknowledged; handler failures are negatively acknowledged for at-least-once retry.
+The subscription factory is also the source of the publish subject, so it
+must return a stable subject per namespace. Handled deliveries and deliveries
+for another namespace are acknowledged; handler failures are negatively
+acknowledged for at-least-once redelivery.
 
-## Store and adapter contracts
+### Disk prefix scans
 
-`Store[K,V]` persists `Entry[V]` values under a string namespace. A returned `present` flag distinguishes an absent record from a stored negative entry. A zero `ExpiresAt` means the entry never expires. Stores must hide logically expired records, never expire or attach a native TTL to zero-expiration entries, isolate namespaces, make missing-key invalidation idempotent, and honor canceled contexts.
-
-`StandardCache` owns namespace and TTL policy. It exposes ordinary value operations through `Cache`, entry-aware operations through `EntryCache`, and multi-key operations through `BatchCache`. `SetEntry` rejects entries that are already expired; a zero `ExpiresAt` is not expired.
-
-The automatic `Codec[T]` directly encodes strings, byte slices, booleans, numeric scalars, and JSON-compatible composites. Interface values require a custom codec because their concrete decode type is ambiguous.
-
-The namespace, key type and codec, value type and codec, and persistent envelope format together define a shared cache schema. Reusing a namespace with incompatible codecs or types can alias keys or turn old values into decode failures. Keep that schema stable across every process sharing a backend; use a new namespace or an explicit invalidation/migration when making an incompatible change.
-
-Key identity depends on the backend. The memory backend uses Go `==` for `K`; serialized backends use the bytes produced by the key codec. In particular, two pointers to equal values are distinct memory keys but produce the same default JSON key. Prefer scalar or value keys when caches may be layered or swapped, or supply a custom codec whose byte identity matches the application's key semantics.
-
-Values are not deep-copied by the root API. The memory backend stores and returns reference-bearing values such as pointers, maps, and slices by reference, so callers must treat cached values as immutable, clone them at the application boundary, or provide their own synchronization. Serialized backends normally return newly decoded values, but that is a codec property rather than a `Cache` guarantee.
-
-## Disk prefix scans
-
-The bbolt store hashes keys by default. Open it with `disk.WithOrderedKeys` to store the key codec's bytes verbatim; bbolt then keeps entries in encoded-key byte order, which enables `ScanPrefix` and `DeletePrefix`:
+The bbolt store hashes keys by default. `disk.WithOrderedKeys` stores the key
+codec's bytes verbatim, which keeps entries in encoded-key order and enables
+`ScanPrefix` and `DeletePrefix`:
 
 ```go
 store, err := disk.Open[string, string](
 	filepath.Join(stateDir, "hashes.db"),
 	disk.WithOrderedKeys[string, string](),
 )
-if err != nil {
-	return err
-}
 defer store.Close()
 
-err = store.ScanPrefix(ctx, "file-hashes", []byte("src/"), func(path string, entry cache.Entry[string]) bool {
-	fmt.Println(path, entry.Value)
-	return true // false stops the scan
-})
+err = store.ScanPrefix(ctx, "file-hashes", []byte("src/"),
+	func(path string, entry cache.Entry[string]) bool {
+		fmt.Println(path, entry.Value)
+		return true // false stops the scan
+	})
 removed, err := store.DeletePrefix(ctx, "file-hashes", []byte("vendor/"))
 ```
 
-The prefix is matched against the bytes produced by the key codec, not against `K`. With the default codec, string keys encode to their raw bytes and `[]byte` keys to themselves, so a prefix is an ordinary string prefix. Integers encode as decimal text, so they sort lexicographically rather than numerically, and composite keys encode as JSON; supply `disk.WithKeyCodec` when another ordering or a structured prefix (for example `dir + "\x00"`) is needed. An empty prefix covers the whole namespace.
+The prefix is matched against encoded key bytes: strings and `[]byte` encode
+to themselves, integers to decimal text (lexicographic order), composite keys
+to JSON; use `disk.WithKeyCodec` for another ordering. `ScanPrefix` runs in
+one read transaction and its callback must not write to the same store.
+Without ordered keys both return `disk.ErrOrderedKeysRequired`. Ordered and
+hashed layouts are separate; always reopen a file with the same choice.
 
-`ScanPrefix` visits live entries in ascending key order inside one read transaction and skips expired entries and entries from before the last `InvalidateAll`; its callback must not write to the same store. `DeletePrefix` removes all matching records in one write transaction and returns how many it removed, including logically expired ones. Without `WithOrderedKeys` both return `disk.ErrOrderedKeysRequired`. Ordered and hashed keys are separate on-disk layouts, so always reopen a file with the same choice. Encoded keys must stay below bbolt's 32 KiB key limit.
+## Packages
 
-## Optional backend packages
+| Package | Purpose |
+| --- | --- |
+| [`github.com/justusschock/go-cache`](https://pkg.go.dev/github.com/justusschock/go-cache) | Contracts (`Store`, `Cache`, `Locker`, `InvalidationBus`), `StandardCache`, `LayeredStore`, `PullThroughCache`, codecs and adapters |
+| `backend/memory` | Bounded in-process LRU store, locker and invalidation bus |
+| `backend/disk` | Persistent bbolt store with atomic batches and prefix scans |
+| `backend/redis` | Redis store, locker and Pub/Sub invalidation bus |
+| `backend/valkey` | Valkey store, locker and Pub/Sub invalidation bus |
+| `backend/dragonfly` | Dragonfly store, locker and invalidation bus (Redis protocol) |
+| `backend/memcached` | Memcached store and locker |
+| `backend/hazelcast` | Hazelcast map store and topic invalidation bus |
+| `backend/postgres` | PostgreSQL store, row-lease locker and LISTEN/NOTIFY invalidation bus |
+| `cachetest` | Conformance suites for `Store`, `BatchStore` and `InvalidationBus` implementations |
 
-Import only the backend needed by an application. Every backend package is included in the root `v0.3.0` module release.
+Packages under `internal/` are not part of the API.
 
-| Package | Store | BatchStore | Locker | Invalidation bus |
+| Backend | Store | BatchStore | Locker | Invalidation bus |
 | --- | --- | --- | --- | --- |
-| `backend/disk` (bbolt) | yes | yes (one transaction) | no | no |
-| `backend/postgres` | yes | no | yes | yes |
+| `backend/memory` | yes | yes (one lock) | yes | yes (in-process) |
+| `backend/disk` | yes | yes (one transaction) | no | no |
 | `backend/redis` | yes | yes (pipelined) | yes | yes |
 | `backend/valkey` | yes | yes (pipelined) | yes | yes |
 | `backend/dragonfly` | yes | yes (pipelined) | yes | yes |
 | `backend/memcached` | yes | no | yes | no |
 | `backend/hazelcast` | yes | no | no | yes |
+| `backend/postgres` | yes | no | yes | yes |
 
-The in-process `backend/memory` store also implements `BatchStore`.
+To test your own implementation:
 
-For example, import `github.com/justusschock/go-cache/backend/redis` after installing the root module.
-
-Remote clients and connection pools remain caller-owned; stores, lockers, and invalidation buses never close them. The bbolt store owns its file handle and must be closed. PostgreSQL requires an explicit idempotent `Migrate` call and uses the server clock for entry and lease expiration decisions. Its `DeleteExpired` operation physically removes expired entry and lock rows and returns their combined count.
-
-Persistent entry envelopes write version two expiration as signed seconds plus nanoseconds and continue to decode version-one nanosecond timestamps. Wire changes require a reader-first rollout: every process that can read a shared namespace must understand a new version before any process writes it. If a dual-reader/write-old staging release is unavailable, cut the new writer fleet over to a new namespace instead of mixing incompatible readers and writers.
-
-Memcached rounds positive TTLs up to the nearest second and uses relative expiration for durations up to 30 days. Entry expirations after its signed 32-bit Unix range use server expiration `0`; the entry envelope still enforces logical expiry, while physical removal is left to Memcached eviction. Leases cannot safely use that fallback, so `Lock` and `Refresh` reject a TTL whose required absolute expiration exceeds the signed 32-bit Unix range. Lease release atomically replaces the owner token with a one-second tombstone and lets that tombstone expire rather than issuing a later delete that could remove a successor. Hazelcast intentionally has no `Locker`: its map API cannot atomically verify a lease token and extend that same value's TTL, so a two-command refresh could extend a successor's lease.
-
-## Errors and observability
-
-Stable sentinel errors support `errors.Is`. Important cases include invalid namespace/TTL/store configuration, invalid memory options, missing layered-cache dependencies, loader panic, lock contention, lost fill leases, and invalid messaging/coordination adapter dependencies.
-
-Layered fail-open errors are available through `Observer` without exposing cache keys or values. A nil or typed-nil optional observer is treated as absent. Every invalidation bus rejects a nil subscriber callback with `ErrNilInvalidationHandler`. The library deliberately does not prescribe metrics, tracing, or logging implementations.
-
-## Non-goals
-
-This module does not provide:
-
-- a correctness-critical database, write-through persistence, or transactions;
-- strong cache coherence, exactly-once invalidation, or total event ordering;
-- fenced database writes after a distributed lease changes ownership;
-- connection management, service discovery, credentials, or infrastructure provisioning;
-- product-specific keys, resources, or codecs.
-
-## Development
-
-The root and all backend packages form one Go module. Run the same repository-wide verification as CI with workspace discovery disabled:
-
-```bash
-GOWORK=off go mod verify
-GOWORK=off go test -race ./...
-GOWORK=off go vet ./...
-pre-commit run --all-files
+```go
+func TestStoreContract(t *testing.T) {
+	cachetest.RunStoreContract(t, func(t *testing.T) cache.Store[string, int] {
+		return mybackend.New[string, int](client)
+	})
+}
 ```
 
-GitHub Actions runs the complete unit, race, vet, formatting, assertion-policy, and module-verification gates on Go 1.25.x and 1.26.x. Integration CI retains race-enabled checks against Redis, Dragonfly, Valkey, Memcached, Hazelcast, and PostgreSQL. Tag builds additionally use `GOWORK=off` and verify the single released module. Releases are annotated repository tags such as `v0.3.0`; time-dependent tests use `testing/synctest`, which sets the Go 1.25 minimum.
+## Design and guarantees
 
-CI private-module access uses the repository secret `GO_MODULES_TOKEN` before `setup-go` or any Go dependency command. The workflow fails explicitly when the secret is absent, passes it only through a masked environment variable, and never prints it. The runner sets `GOPRIVATE` and `GONOSUMDB` for `github.com/justusschock/*` and installs an ephemeral authenticated Git URL rewrite; it does not change developer credential configuration.
+**Concurrency.** Every exported type is safe for concurrent use. Operations
+that block or perform I/O take a `context.Context` first and honour
+cancellation. Remote clients and pools are caller-owned: stores, lockers and
+buses never close them. The memory and disk stores own resources and must be
+closed; `Close` is idempotent.
 
-Local implementation plans under `docs/` and local workspaces are intentionally ignored by Git.
+**Expiry.** `Entry.ExpiresAt` is the logical expiration and is enforced on
+read by every store; native TTLs are used only to reclaim space. PostgreSQL
+uses the server clock and offers `Migrate` (idempotent schema creation) and
+`DeleteExpired` (physical cleanup of entries and locks). Memcached rounds
+TTLs up to whole seconds; leases whose expiry exceeds its signed 32-bit Unix
+range are rejected. Hazelcast has no `Locker`, because its map API cannot
+atomically verify a lease token and extend that value's TTL.
+
+**Errors.** Sentinel errors (for example `ErrInvalidTTL`, `ErrNilStore`,
+`ErrBatchLength`, `ErrLockNotAcquired`, `ErrLeaseLost`, `ErrFillLeaseLost`,
+`ErrLoaderPanic`) support `errors.Is`; underlying errors are wrapped with
+`%w`, and operations on several layers join their errors. Nil and typed-nil
+dependencies are rejected at construction. The library never logs; layered
+fail-open errors reach the optional `Observer`, whose events contain no keys
+or values.
+
+**Keys, values and schema.** The memory backend compares keys with Go `==`;
+serialized backends compare the bytes produced by the key codec, so two
+pointers to equal values are distinct memory keys but the same default JSON
+key. Values are not copied: the memory backend returns reference-bearing
+values by reference, so treat cached values as immutable. The namespace, key
+and value types and codecs, and the entry envelope together form a shared
+schema; change it with a new namespace or an explicit migration. The
+`DefaultCodec` encodes strings, byte slices, booleans and numbers directly
+and other values as JSON; interface types need a custom codec.
+
+**Wire formats.** Serialized backends write a versioned entry envelope
+(version 2; version 1 is still read) and a versioned invalidation message.
+Format changes are rolled out reader-first: every process that reads a
+shared namespace must understand a new version before any process writes it.
+
+**Non-goals.** go-cache is not a correctness-critical database and offers no
+write-through persistence or transactions across keys, no strong coherence or
+exactly-once invalidation, no fenced writes after lease loss, and no
+connection management or provisioning.
+
+**Stability.** The module is at `v0.x`: minor releases may break the API.
+Every break is listed in [CHANGELOG.md](CHANGELOG.md) and backed by an ADR.
+
+## Documentation
+
+- [docs/README.md](docs/README.md): requirements (PRD) and architecture
+  decision records.
+- [pkg.go.dev](https://pkg.go.dev/github.com/justusschock/go-cache): API
+  reference and examples.
+
+## Contributing
+
+Contributions are welcome through pull requests; nothing is pushed to `main`
+directly. Read [AGENTS.md](AGENTS.md) first: it describes the docs-first
+process, the API and testing rules, and the checks to run before opening a
+pull request.
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

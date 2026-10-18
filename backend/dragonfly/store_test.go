@@ -17,6 +17,7 @@ func (*nilCodec[T]) Decode([]byte) (T, error) {
 	return zero, nil
 }
 
+// FR-CACHE-22
 func TestNewRejectsNilClient(t *testing.T) {
 	_, err := dragonfly.New[string, int](nil)
 	assert.ErrorIs(t, err, dragonfly.ErrNilClient)
@@ -28,6 +29,7 @@ func TestNewRejectsNilClient(t *testing.T) {
 	assert.ErrorIs(t, err, dragonfly.ErrNilCodec)
 }
 
+// FR-CACHE-22
 func TestNewLockerRejectsNilClient(t *testing.T) {
 	_, err := dragonfly.NewLocker[string](nil)
 	assert.ErrorIs(t, err, dragonfly.ErrNilClient)
@@ -39,6 +41,7 @@ func TestNewLockerRejectsNilClient(t *testing.T) {
 	assert.ErrorIs(t, err, dragonfly.ErrNilCodec)
 }
 
+// FR-CACHE-22
 func TestNewInvalidationBusRejectsNilClient(t *testing.T) {
 	_, err := dragonfly.NewInvalidationBus[string](nil)
 	assert.ErrorIs(t, err, dragonfly.ErrNilClient)
