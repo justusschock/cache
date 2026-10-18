@@ -1,39 +1,43 @@
 # Changelog
 
-All notable changes to this project are documented in this file. The format
-is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the
-project follows [Semantic Versioning](https://semver.org/). While the major
-version is 0, minor releases may contain breaking changes; each one is listed
-here.
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+While the major version is `0`, a minor release may break the API.
 
 ## [Unreleased]
 
-Preparation for the first public release.
+## [0.1.0] - 2026-10-18
+
+First public release.
 
 ### Added
 
-- Public `cachetest` package with the `RunStoreContract`,
-  `RunBatchStoreContract` and `RunInvalidationBusContract` conformance suites
-  for third-party `Store`, `BatchStore` and `InvalidationBus`
-  implementations (previously `internal/cachetest`).
-- Package documentation, doc comments for every exported identifier, and
-  runnable examples for the quick start, pull-through loading and layered
-  stores.
-- Requirements (PRD-0001) and architecture decision records in `docs/`,
-  `AGENTS.md`, `NOTICE`, and this changelog.
-- CI on Go 1.25.x, oldstable and stable with the race detector,
-  golangci-lint and the existing integration job; Dependabot for Go modules
-  and GitHub Actions.
+- Typed `Cache[K, V]` and `Store[K, V]` contracts with namespaces, default
+  and per-write TTLs, negative entries and never-expiring entries
+  (`NoExpiry`); `New` builds a `StandardCache` over any store.
+- Batch reads, writes and invalidations through `BatchCache` and
+  `BatchStore`.
+- `LayeredStore` (`NewLayered`): fastest-to-slowest layers with
+  expiry-preserving promotion, fail-open or strict reads, and an `Observer`
+  hook.
+- `PullThroughCache` (`NewPullThrough`): per-key single flight with
+  waiter-scoped cancellation, negative caching, loader-panic recovery and
+  optional renewable fill leases through a `Locker`.
+- Distributed invalidation over any `InvalidationBus`
+  (`NewLayeredWithInvalidationBus`, `ListenInvalidations`), with adapters
+  for messaging (`NewMessagingInvalidationBus`) and distributed-coordination
+  (`NewCoordinationLocker`).
+- In-process and on-disk backends: `backend/memory` (bounded LRU) and
+  `backend/disk` (bbolt, atomic batches, ordered prefix scans).
+- Remote backends: `backend/redis`, `backend/valkey`, `backend/dragonfly`,
+  `backend/memcached`, `backend/hazelcast` and `backend/postgres`.
+- Package `cachetest`: the `RunStoreContract`, `RunBatchStoreContract` and
+  `RunInvalidationBusContract` conformance suites.
+- Requirements and architecture decision records under `docs/`.
 
-### Changed
+Requires Go 1.25 or newer.
 
-- Time- and concurrency-dependent tests run on virtual time with
-  `testing/synctest`; the Memcached lease-release test no longer needs
-  network access.
-- CI no longer needs repository secrets or module-access configuration.
-- No exported identifier was removed or renamed.
-
-### Requirements
-
-- Go 1.25 or newer (unchanged; required by `testing/synctest`).
-
+[Unreleased]: https://github.com/justusschock/cache/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/justusschock/cache/releases/tag/v0.1.0
