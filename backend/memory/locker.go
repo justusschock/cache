@@ -25,6 +25,9 @@ func NewLocker[K comparable]() *Locker[K] {
 	return &Locker[K]{locks: make(map[string]map[K]lockRecord)}
 }
 
+// Lock acquires a lease on key in namespace for ttl. It returns
+// cache.ErrLockNotAcquired while another lease is live and
+// cache.ErrInvalidTTL for a non-positive ttl.
 func (l *Locker[K]) Lock(ctx context.Context, namespace string, key K, ttl time.Duration) (cache.Lease, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

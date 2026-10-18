@@ -1,3 +1,6 @@
+// Package wire implements the persistent entry envelope and the invalidation
+// message format shared by the serialized backends. Both formats are
+// versioned; readers must understand a version before any writer emits it.
 package wire
 
 import (
@@ -11,6 +14,7 @@ import (
 	cache "github.com/justusschock/go-cache"
 )
 
+// ErrInvalidEnvelope reports a truncated envelope or an unknown version.
 var ErrInvalidEnvelope = errors.New("cache: invalid entry envelope")
 
 const (
@@ -28,10 +32,12 @@ type Encoder[K comparable, V any] struct {
 	valueCodec cache.Codec[V]
 }
 
+// New returns an encoder for the given key and value codecs.
 func New[K comparable, V any](keyCodec cache.Codec[K], valueCodec cache.Codec[V]) *Encoder[K, V] {
 	return &Encoder[K, V]{keyCodec: keyCodec, valueCodec: valueCodec}
 }
 
+// Key returns the SHA-256 digest of the encoded key.
 func (e *Encoder[K, V]) Key(key K) ([sha256.Size]byte, error) {
 	encoded, err := e.keyCodec.Encode(key)
 	if err != nil {
@@ -40,10 +46,14 @@ func (e *Encoder[K, V]) Key(key K) ([sha256.Size]byte, error) {
 	return sha256.Sum256(encoded), nil
 }
 
+// Namespace returns the SHA-256 digest of namespace.
 func Namespace(namespace string) [sha256.Size]byte {
 	return sha256.Sum256([]byte(namespace))
 }
 
+// Encode serializes entry and the namespace generation as a version-2
+// envelope: version byte, generation (uint64), expiry seconds (int64) and
+// nanoseconds (uint32), flags byte, then the encoded value.
 func (e *Encoder[K, V]) Encode(entry cache.Entry[V], generation uint64) ([]byte, error) {
 	flags := byte(0)
 	if entry.Found {
@@ -71,6 +81,7 @@ func (e *Encoder[K, V]) Encode(entry cache.Entry[V], generation uint64) ([]byte,
 	return envelope, nil
 }
 
+// Decode parses a version-1 or version-2 envelope.
 func (e *Encoder[K, V]) Decode(envelope []byte) (cache.Entry[V], uint64, error) {
 	var zero cache.Entry[V]
 	if len(envelope) == 0 {

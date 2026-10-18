@@ -8,6 +8,8 @@ import (
 	"strconv"
 )
 
+// ErrUntypedValue reports a DefaultCodec decode into an interface type, whose
+// concrete type cannot be recovered from the encoded bytes.
 var ErrUntypedValue = errors.New("cache: decoding an interface value requires a custom codec")
 
 // Codec converts a typed value to and from bytes for persistent stores.

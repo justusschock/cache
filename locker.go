@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// Errors reported by lockers, leases and lease-guarded fills.
 var (
 	ErrLockNotAcquired = errors.New("cache: lock not acquired")
 	ErrLeaseLost       = errors.New("cache: lease is no longer owned")
@@ -24,6 +25,8 @@ type Lease interface {
 	Release(context.Context) error
 }
 
+// ObservableLease is a Lease that reports loss of ownership by closing the
+// channel returned by Done.
 type ObservableLease interface {
 	Lease
 	Done() <-chan struct{}

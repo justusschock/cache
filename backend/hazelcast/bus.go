@@ -57,6 +57,7 @@ func NewInvalidationBus[K comparable](ctx context.Context, client *hazelcastclie
 	return &InvalidationBus[K]{topic: topic, keyCodec: config.keyCodec}, nil
 }
 
+// Publish sends event to the subscribers of event.Namespace.
 func (b *InvalidationBus[K]) Publish(ctx context.Context, event cache.InvalidationEvent[K]) error {
 	payload, err := wire.EncodeInvalidation(event, b.keyCodec)
 	if err != nil {
@@ -68,6 +69,10 @@ func (b *InvalidationBus[K]) Publish(ctx context.Context, event cache.Invalidati
 	return nil
 }
 
+// Subscribe calls handler for every event published for namespace until ctx
+// ends, returning ctx.Err(), or until receiving or handling an event fails,
+// returning that error. A nil handler is rejected with
+// cache.ErrNilInvalidationHandler.
 func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, handler cache.InvalidationHandler[K]) error {
 	if handler == nil {
 		return cache.ErrNilInvalidationHandler

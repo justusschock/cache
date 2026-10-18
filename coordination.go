@@ -9,6 +9,7 @@ import (
 	coordination "github.com/justusschock/go-distributed-coordination"
 )
 
+// Errors returned by NewCoordinationLocker and CoordinationLocker.Lock.
 var (
 	ErrNilCoordinationBackend = errors.New("cache: coordination backend must not be nil")
 	ErrEmptyCoordinationOwner = errors.New("cache: coordination owner must not be empty")
@@ -16,14 +17,23 @@ var (
 	ErrNilCoordinationLease   = errors.New("cache: coordination backend returned a nil lease")
 )
 
+// FillKeyFunc derives the coordination lease key for a cache key. It must be
+// deterministic and injective over the complete (namespace, key) tuple and
+// stable across deployments, or different keys may share one lease.
 type FillKeyFunc[K comparable] func(namespace string, key K) (string, error)
 
+// CoordinationLocker is a Locker backed by any go-distributed-coordination
+// Backend. Its leases implement ObservableLease. It is safe for concurrent
+// use if the backend is.
 type CoordinationLocker[K comparable] struct {
 	backend coordination.Backend
 	owner   string
 	key     FillKeyFunc[K]
 }
 
+// NewCoordinationLocker adapts backend into a Locker that acquires leases as
+// owner under keys derived by key. It returns ErrNilCoordinationBackend,
+// ErrEmptyCoordinationOwner or ErrNilFillKeyFunc for missing dependencies.
 func NewCoordinationLocker[K comparable](
 	backend coordination.Backend,
 	owner string,
@@ -41,6 +51,10 @@ func NewCoordinationLocker[K comparable](
 	return &CoordinationLocker[K]{backend: backend, owner: owner, key: key}, nil
 }
 
+// Lock acquires a lease for the fill key of (namespace, key), waiting as the
+// backend's Acquire with Wait set does. Contention is reported as
+// ErrLockNotAcquired and a lost or foreign lease as ErrLeaseLost, each joined
+// with the backend error.
 func (l *CoordinationLocker[K]) Lock(
 	ctx context.Context,
 	namespace string,

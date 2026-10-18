@@ -5,6 +5,8 @@ import (
 	"errors"
 )
 
+// ErrNilInvalidationHandler reports a nil handler passed to
+// InvalidationBus.Subscribe.
 var ErrNilInvalidationHandler = errors.New("cache: invalidation handler must not be nil")
 
 // InvalidationKind identifies the scope of an invalidation event.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 )
 
+// Errors returned by layered-store constructors and ListenInvalidations.
 var (
 	ErrNoLayers          = errors.New("cache: at least one layer is required")
 	ErrNoInvalidationBus = errors.New("cache: no invalidation bus configured")
@@ -95,6 +96,10 @@ func newLayered[K comparable, V any](layers []Store[K, V], bus InvalidationBus[K
 	}, nil
 }
 
+// Get reads layers from fastest to slowest and returns the first entry
+// found, promoting it unchanged into every faster layer that missed. A layer
+// error is reported to the Observer and treated as a miss, unless
+// WithStrictLayerReads is set, in which case it is returned.
 func (s *LayeredStore[K, V]) Get(ctx context.Context, namespace string, key K) (Entry[V], bool, error) {
 	var zero Entry[V]
 	if err := ctx.Err(); err != nil {
@@ -126,6 +131,9 @@ func (s *LayeredStore[K, V]) Get(ctx context.Context, namespace string, key K) (
 	return zero, false, nil
 }
 
+// Set writes entry to the slowest layer first and then to each faster layer.
+// A slowest-layer failure stops the write; faster-layer failures are joined.
+// With an invalidation bus, a key-scoped event is published afterwards.
 func (s *LayeredStore[K, V]) Set(ctx context.Context, namespace string, key K, entry Entry[V]) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -149,6 +157,8 @@ func (s *LayeredStore[K, V]) Set(ctx context.Context, namespace string, key K, e
 	return joined
 }
 
+// Invalidate removes key from every layer, joining the errors, and publishes
+// a key-scoped event when an invalidation bus is configured.
 func (s *LayeredStore[K, V]) Invalidate(ctx context.Context, namespace string, key K) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -196,6 +206,8 @@ func (s *LayeredStore[K, V]) ListenInvalidations(ctx context.Context, namespace 
 	})
 }
 
+// InvalidateAll removes namespace from every layer, joining the errors, and
+// publishes a namespace-scoped event when an invalidation bus is configured.
 func (s *LayeredStore[K, V]) InvalidateAll(ctx context.Context, namespace string) error {
 	if err := ctx.Err(); err != nil {
 		return err

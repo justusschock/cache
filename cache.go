@@ -9,9 +9,13 @@ import (
 )
 
 var (
+	// ErrEmptyNamespace reports an empty cache namespace.
 	ErrEmptyNamespace = errors.New("cache: namespace must not be empty")
-	ErrInvalidTTL     = errors.New("cache: ttl must be positive")
-	ErrNilStore       = errors.New("cache: store must not be nil")
+	// ErrInvalidTTL reports a non-positive TTL other than NoExpiry, or an
+	// entry that is already expired.
+	ErrInvalidTTL = errors.New("cache: ttl must be positive")
+	// ErrNilStore reports a nil or typed-nil store.
+	ErrNilStore = errors.New("cache: store must not be nil")
 )
 
 // NoExpiry is the explicit opt-in TTL for entries that never expire. New and
@@ -29,6 +33,8 @@ type Cache[K comparable, V any] interface {
 	InvalidateAll(context.Context) error
 }
 
+// EntryCache is an optional Cache extension that exposes stored entries,
+// including negative entries and their expiration.
 type EntryCache[K comparable, V any] interface {
 	Cache[K, V]
 	GetEntry(context.Context, K) (Entry[V], bool, error)
@@ -68,6 +74,8 @@ func New[K comparable, V any](namespace string, defaultTTL time.Duration, store 
 	return &StandardCache[K, V]{namespace: namespace, defaultTTL: defaultTTL, store: store}, nil
 }
 
+// Get returns the value cached under key and whether it was found. Missing,
+// expired and negative entries report found as false.
 func (c *StandardCache[K, V]) Get(ctx context.Context, key K) (V, bool, error) {
 	var zero V
 	entry, present, err := c.GetEntry(ctx, key)
@@ -80,6 +88,7 @@ func (c *StandardCache[K, V]) Get(ctx context.Context, key K) (V, bool, error) {
 	return entry.Value, true, nil
 }
 
+// Set stores value under key with the cache's default TTL.
 func (c *StandardCache[K, V]) Set(ctx context.Context, key K, value V) error {
 	return c.SetWithTTL(ctx, key, value, c.defaultTTL)
 }
@@ -99,6 +108,7 @@ func (c *StandardCache[K, V]) SetWithTTL(ctx context.Context, key K, value V, tt
 	return nil
 }
 
+// Invalidate removes key. Removing a missing key is not an error.
 func (c *StandardCache[K, V]) Invalidate(ctx context.Context, key K) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -109,6 +119,7 @@ func (c *StandardCache[K, V]) Invalidate(ctx context.Context, key K) error {
 	return nil
 }
 
+// InvalidateAll removes every key in the cache's namespace.
 func (c *StandardCache[K, V]) InvalidateAll(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -119,6 +130,8 @@ func (c *StandardCache[K, V]) InvalidateAll(ctx context.Context) error {
 	return nil
 }
 
+// GetEntry returns the entry stored under key, including negative entries,
+// and whether a live entry is present. Expired entries are reported absent.
 func (c *StandardCache[K, V]) GetEntry(ctx context.Context, key K) (Entry[V], bool, error) {
 	var zero Entry[V]
 	if err := ctx.Err(); err != nil {

@@ -71,6 +71,9 @@ func New[K comparable, V any](client goredis.UniversalClient, options ...Option[
 	return &Store[K, V]{client: client, encoder: wire.New(config.keyCodec, config.valueCodec)}, nil
 }
 
+// Get returns the live entry stored under key in namespace and whether one
+// is present. Expired entries and entries written before the namespace's
+// last InvalidateAll are reported as absent.
 func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.Entry[V], bool, error) {
 	var zero cache.Entry[V]
 	if err := ctx.Err(); err != nil {
@@ -101,6 +104,8 @@ func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.E
 	return entry, true, nil
 }
 
+// Set stores entry under key in namespace, replacing any previous entry.
+// An entry with a zero ExpiresAt never expires.
 func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry cache.Entry[V]) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -127,6 +132,8 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 	return nil
 }
 
+// Invalidate removes key from namespace. Removing a missing key is not an
+// error.
 func (s *Store[K, V]) Invalidate(ctx context.Context, namespace string, key K) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -141,6 +148,9 @@ func (s *Store[K, V]) Invalidate(ctx context.Context, namespace string, key K) e
 	return nil
 }
 
+// InvalidateAll hides every entry in namespace by advancing the namespace
+// generation. Older records are ignored on read and left to expire or be
+// overwritten.
 func (s *Store[K, V]) InvalidateAll(ctx context.Context, namespace string) error {
 	if err := ctx.Err(); err != nil {
 		return err

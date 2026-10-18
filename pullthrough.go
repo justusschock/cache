@@ -8,6 +8,7 @@ import (
 	"time"
 )
 
+// Errors returned by NewPullThrough and PullThroughCache.Get.
 var (
 	ErrNilCache    = errors.New("cache: wrapped cache must not be nil")
 	ErrNilLoader   = errors.New("cache: loader must not be nil")
@@ -128,6 +129,11 @@ func NewPullThrough[K comparable, V any](namespace string, wrapped Cache[K, V], 
 	}, nil
 }
 
+// Get returns the cached value for key, loading it on a miss. Concurrent
+// misses for one key share a single load; each caller waits with its own
+// ctx, and the load is canceled once every waiter has left. Authoritative
+// misses are cached for the negative TTL when the wrapped cache is an
+// EntryCache; loader errors are never cached.
 func (c *PullThroughCache[K, V]) Get(ctx context.Context, key K) (V, bool, error) {
 	value, state, err := c.lookup(ctx, key)
 	if err != nil {
@@ -159,18 +165,22 @@ func (c *PullThroughCache[K, V]) Get(ctx context.Context, key K) (V, bool, error
 	})
 }
 
+// Set delegates to the wrapped cache.
 func (c *PullThroughCache[K, V]) Set(ctx context.Context, key K, value V) error {
 	return c.cache.Set(ctx, key, value)
 }
 
+// SetWithTTL delegates to the wrapped cache.
 func (c *PullThroughCache[K, V]) SetWithTTL(ctx context.Context, key K, value V, ttl time.Duration) error {
 	return c.cache.SetWithTTL(ctx, key, value, ttl)
 }
 
+// Invalidate delegates to the wrapped cache.
 func (c *PullThroughCache[K, V]) Invalidate(ctx context.Context, key K) error {
 	return c.cache.Invalidate(ctx, key)
 }
 
+// InvalidateAll delegates to the wrapped cache.
 func (c *PullThroughCache[K, V]) InvalidateAll(ctx context.Context) error {
 	return c.cache.InvalidateAll(ctx)
 }

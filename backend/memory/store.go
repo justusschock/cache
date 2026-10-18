@@ -11,6 +11,8 @@ import (
 	cache "github.com/justusschock/go-cache"
 )
 
+// ErrInvalidOptions reports Options with a non-positive MaxEntries or
+// CleanupInterval.
 var ErrInvalidOptions = errors.New("cache memory: invalid options")
 
 const (
@@ -18,8 +20,13 @@ const (
 	defaultCleanupInterval = time.Minute
 )
 
+// Options bounds a memory Store.
 type Options struct {
-	MaxEntries      int
+	// MaxEntries is the global number of live entries across all
+	// namespaces; the least recently used entry is evicted beyond it.
+	MaxEntries int
+	// CleanupInterval is how often the background sweeper removes expired
+	// and invalidated entries.
 	CleanupInterval time.Duration
 }
 
@@ -59,6 +66,9 @@ func New[K comparable, V any]() *Store[K, V] {
 	return store
 }
 
+// NewWithOptions constructs an empty store bounded by options and starts its
+// expiration sweeper. It returns ErrInvalidOptions for invalid options. The
+// store must be closed to stop the sweeper.
 func NewWithOptions[K comparable, V any](options Options) (*Store[K, V], error) {
 	if options.MaxEntries <= 0 || options.CleanupInterval <= 0 {
 		return nil, ErrInvalidOptions
@@ -74,6 +84,9 @@ func NewWithOptions[K comparable, V any](options Options) (*Store[K, V], error) 
 	return store, nil
 }
 
+// Get returns the live entry stored under key in namespace and whether one
+// is present. Expired entries and entries written before the namespace's
+// last InvalidateAll are reported as absent.
 func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.Entry[V], bool, error) {
 	var zero cache.Entry[V]
 	if err := ctx.Err(); err != nil {
@@ -89,6 +102,9 @@ func (s *Store[K, V]) Get(ctx context.Context, namespace string, key K) (cache.E
 	return entry, present, nil
 }
 
+// Set stores entry under key in namespace, replacing any previous entry and
+// marking it most recently used. The least recently used entry is evicted
+// when the store exceeds Options.MaxEntries.
 func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry cache.Entry[V]) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -103,6 +119,8 @@ func (s *Store[K, V]) Set(ctx context.Context, namespace string, key K, entry ca
 	return nil
 }
 
+// Invalidate removes key from namespace. Removing a missing key is not an
+// error.
 func (s *Store[K, V]) Invalidate(ctx context.Context, namespace string, key K) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -117,6 +135,7 @@ func (s *Store[K, V]) Invalidate(ctx context.Context, namespace string, key K) e
 	return nil
 }
 
+// InvalidateAll removes every entry in namespace.
 func (s *Store[K, V]) InvalidateAll(ctx context.Context, namespace string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -196,12 +215,16 @@ func (s *Store[K, V]) InvalidateMany(ctx context.Context, namespace string, keys
 	return nil
 }
 
+// Len returns the number of entries currently held across all namespaces,
+// including expired entries the sweeper has not removed yet.
 func (s *Store[K, V]) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lru.Len()
 }
 
+// Close stops the expiration sweeper and waits for it to exit. It is
+// idempotent and always returns nil. Close does not discard stored entries.
 func (s *Store[K, V]) Close() error {
 	s.closeOnce.Do(func() { close(s.stop) })
 	<-s.done

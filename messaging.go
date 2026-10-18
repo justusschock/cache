@@ -8,6 +8,7 @@ import (
 	"github.com/justusschock/go-messaging"
 )
 
+// Errors returned by NewMessagingInvalidationBus.
 var (
 	ErrNilMessagingPublisher  = errors.New("cache: messaging publisher must not be nil")
 	ErrNilMessagingSubscriber = errors.New("cache: messaging subscriber must not be nil")
@@ -18,12 +19,16 @@ var (
 // for both publishing and subscribing. In particular, Subject must be stable.
 type SubscriptionFactory func(namespace string) messaging.Subscription
 
+// MessagingInvalidationBus is an InvalidationBus over typed go-messaging
+// publishers and subscribers. It is safe for concurrent use if they are.
 type MessagingInvalidationBus[K comparable] struct {
 	publisher  messaging.Publisher[InvalidationEvent[K]]
 	subscriber messaging.Subscriber[InvalidationEvent[K]]
 	factory    SubscriptionFactory
 }
 
+// NewMessagingInvalidationBus constructs a bus that publishes to and
+// subscribes on the subscription that factory returns for each namespace.
 func NewMessagingInvalidationBus[K comparable](
 	publisher messaging.Publisher[InvalidationEvent[K]],
 	subscriber messaging.Subscriber[InvalidationEvent[K]],
@@ -45,6 +50,8 @@ func NewMessagingInvalidationBus[K comparable](
 	}, nil
 }
 
+// Publish wraps event in an envelope addressed to the subject of its
+// namespace's subscription and publishes it.
 func (b *MessagingInvalidationBus[K]) Publish(ctx context.Context, event InvalidationEvent[K]) error {
 	envelope, err := messaging.NewEnvelope(b.factory(event.Namespace).Subject, event)
 	if err != nil {
@@ -56,6 +63,10 @@ func (b *MessagingInvalidationBus[K]) Publish(ctx context.Context, event Invalid
 	return nil
 }
 
+// Subscribe follows the go-messaging subscriber lifetime and normally blocks
+// until ctx ends. Handled deliveries and deliveries for another namespace are
+// acknowledged; handler failures are negatively acknowledged so that an
+// at-least-once transport redelivers them.
 func (b *MessagingInvalidationBus[K]) Subscribe(
 	ctx context.Context,
 	namespace string,
