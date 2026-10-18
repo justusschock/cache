@@ -31,11 +31,7 @@ Preparation for the first public release.
   `testing/synctest`; the Memcached lease-release test no longer needs
   network access.
 - CI no longer needs repository secrets or module-access configuration.
-
-### Removed
-
-- **Breaking:** `memory.(*InvalidationBus).SubscriberCount` is no longer
-  exported. It existed only for tests.
+- No exported identifier was removed or renamed.
 
 ### Requirements
 

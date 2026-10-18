@@ -29,10 +29,17 @@ root package (`Cache`, `Entry`, `New`, `NewPullThrough`, `StandardCache`) and
 1. **Keep the existing surface unchanged**
    - Pro: no churn.
    - Con: the conformance suites are unreachable for third-party
-     implementers, and a test-only diagnostic method stays public.
+     implementers.
 2. **Minimal boundary changes driven by the review** (chosen)
-   - Pro: fixes both problems without touching consumer-visible API.
-   - Con: one exported method is removed (breaking for any unknown user).
+   - Pro: publishes the conformance suites without removing or renaming any
+     exported identifier.
+   - Con: `cachetest` becomes public API.
+3. **Also unexport `memory.(*InvalidationBus).SubscriberCount`**
+   - Pro: the repository's own tests no longer need it to wait for a
+     subscription, because they use `synctest.Wait` (ADR-0012).
+   - Con: it is the only way for users of the in-process bus to observe
+     whether a listener is subscribed or has been released; removing it
+     breaks any caller for no safety gain.
 
 ## Decision
 
@@ -41,7 +48,7 @@ The public API is:
 | Package | Public contents |
 |---|---|
 | `github.com/justusschock/go-cache` | `Store`, `BatchStore`, `Entry`, `Cache`, `EntryCache`, `BatchCache`, `StandardCache`/`New`, `NoExpiry`, `Codec`/`DefaultCodec`, `LayeredStore`/`NewLayered`/`NewLayeredWithInvalidationBus` with `LayeredOption`s, `Observer`/`Event`, `PullThroughCache`/`NewPullThrough` with `PullThroughOption`s and `Loader`, `Locker`/`Lease`/`ObservableLease`, `CoordinationLocker`/`FillKeyFunc`, `InvalidationBus`/`InvalidationEvent`/`InvalidationKind`/`InvalidationHandler`, `MessagingInvalidationBus`/`SubscriptionFactory`, and all sentinel errors |
-| `backend/memory` | `Store` (`New`, `NewWithOptions`, `Options`, `Len`, `Close`, batch methods), `Locker`, `InvalidationBus`, `ErrInvalidOptions` |
+| `backend/memory` | `Store` (`New`, `NewWithOptions`, `Options`, `Len`, `Close`, batch methods), `Locker`, `InvalidationBus` (`NewInvalidationBus`, `SubscriberCount`), `ErrInvalidOptions` |
 | `backend/disk` | `Store` (`Open`, options, batch methods, `ScanPrefix`, `DeletePrefix`, `Close`) and its errors |
 | `backend/redis`, `valkey`, `dragonfly`, `memcached`, `hazelcast`, `postgres` | `Store`/`New`, `Locker`/`NewLocker` and `InvalidationBus`/`NewInvalidationBus` where offered, codec options, errors, and PostgreSQL's `Migrate`/`DeleteExpired` |
 | `cachetest` | `RunStoreContract`, `RunBatchStoreContract`, `RunInvalidationBusContract`, `StoreFactory`, `BatchStoreFactory` |
@@ -60,9 +67,10 @@ Changes made for the release:
   `Store`, `BatchStore` and `InvalidationBus` are public interfaces meant for
   third-party implementations (ADR-0006). Its goroutine helper `Go`, used
   only by this repository's tests, was unexported.
-- `memory.(*InvalidationBus).SubscriberCount` was unexported. It existed only
-  so tests could poll for a subscription; tests now use `synctest.Wait`
-  (ADR-0012). No known consumer used it.
+- `memory.(*InvalidationBus).SubscriberCount` stays exported (option 3 was
+  rejected). It reports the active subscriptions of a namespace, which lets
+  users of the in-process bus wait for a listener or check that one was
+  released; the repository's tests use it alongside `synctest.Wait`.
 
 Exported option function types with unexported parameter types (for example
 `Option[K, V] func(*config[K, V]) error`) are kept: they let callers name and
@@ -75,9 +83,9 @@ pass options while keeping the configuration structs private.
 - The surface frozen by semver is the documented one.
 
 ### Negative
-- Removing `SubscriberCount` breaks any unknown caller of it; recorded in
-  the changelog.
 - `cachetest` and its testify dependency are now public API.
+- `SubscriberCount` remains covered by semver although only the in-process
+  bus offers it.
 
 ### Follow-ups
 - Any future change to this boundary needs a new ADR and a changelog entry.

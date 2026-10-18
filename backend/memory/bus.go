@@ -73,7 +73,11 @@ func (b *InvalidationBus[K]) Subscribe(ctx context.Context, namespace string, ha
 	return ctx.Err()
 }
 
-// SubscriberCount returns the number of active namespace subscribers.
+// SubscriberCount returns the number of handlers currently subscribed to
+// namespace. A subscription counts from the moment Subscribe registers it
+// until its context ends, so callers can use it to wait for listeners to be
+// ready or to check that subscriptions are released. It is safe for
+// concurrent use.
 func (b *InvalidationBus[K]) SubscriberCount(namespace string) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
