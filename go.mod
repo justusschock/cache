@@ -6,9 +6,9 @@ require (
 	github.com/bradfitz/gomemcache v0.0.0-20260422231931-4d751bb6e37c
 	github.com/hazelcast/hazelcast-go-client v1.6.0
 	github.com/jackc/pgx/v5 v5.7.4
-	github.com/justusschock/concurrency v0.2.0
-	github.com/justusschock/distributed-coordination v0.2.0
-	github.com/justusschock/messaging v0.2.0
+	github.com/justusschock/concurrency v0.1.0
+	github.com/justusschock/distributed-coordination v0.1.0
+	github.com/justusschock/messaging v0.1.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/stretchr/testify v1.10.0
 	github.com/valkey-io/valkey-go v1.0.55
