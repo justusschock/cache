@@ -10,7 +10,7 @@ import (
 	"github.com/hazelcast/hazelcast-go-client"
 	cache "github.com/justusschock/go-cache"
 	hazelcastcache "github.com/justusschock/go-cache/backend/hazelcast"
-	"github.com/justusschock/go-cache/internal/cachetest"
+	"github.com/justusschock/go-cache/cachetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

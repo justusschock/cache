@@ -12,7 +12,7 @@ import (
 
 	cache "github.com/justusschock/go-cache"
 	"github.com/justusschock/go-cache/backend/disk"
-	"github.com/justusschock/go-cache/internal/cachetest"
+	"github.com/justusschock/go-cache/cachetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

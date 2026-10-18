@@ -10,7 +10,7 @@ import (
 
 	cache "github.com/justusschock/go-cache"
 	rediscache "github.com/justusschock/go-cache/backend/redis"
-	"github.com/justusschock/go-cache/internal/cachetest"
+	"github.com/justusschock/go-cache/cachetest"
 	goredis "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -10,7 +10,6 @@ import (
 
 	cache "github.com/justusschock/go-cache"
 	"github.com/justusschock/go-cache/backend/memory"
-	"github.com/justusschock/go-cache/internal/cachetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -99,7 +98,7 @@ func TestPullThroughSuppressesConcurrentLoads(t *testing.T) {
 	const workers = 32
 	results := make(chan error, workers)
 	for range workers {
-		cachetest.Go(results, func() error {
+		goReport(results, func() error {
 			value, found, getErr := pull.Get(context.Background(), "alice")
 			if getErr != nil {
 				return getErr

@@ -7,7 +7,7 @@ import (
 
 	cache "github.com/justusschock/go-cache"
 	"github.com/justusschock/go-cache/backend/memory"
-	"github.com/justusschock/go-cache/internal/cachetest"
+	"github.com/justusschock/go-cache/cachetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -34,7 +34,7 @@ func TestLayeredInvalidationBusEvictsOtherWorkersUpperLayers(t *testing.T) {
 
 	listenCtx, cancel := context.WithCancel(context.Background())
 	listenerResult := make(chan error, 1)
-	cachetest.Go(listenerResult, func() error {
+	goReport(listenerResult, func() error {
 		return layeredB.ListenInvalidations(listenCtx, "users", 1)
 	})
 	deadline := time.Now().Add(time.Second)
@@ -71,7 +71,7 @@ func TestLayeredInvalidationBusPropagatesNamespaceInvalidation(t *testing.T) {
 
 	listenCtx, cancel := context.WithCancel(context.Background())
 	listenerResult := make(chan error, 1)
-	cachetest.Go(listenerResult, func() error {
+	goReport(listenerResult, func() error {
 		return layered.ListenInvalidations(listenCtx, "users", 1)
 	})
 	deadline := time.Now().Add(time.Second)

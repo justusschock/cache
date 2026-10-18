@@ -11,10 +11,16 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// StoreFactory returns a fresh store for each contract subtest.
+// StoreFactory returns the store under test for one contract subtest. It may
+// return a new store or one shared with other subtests; the suite isolates
+// subtests by namespace. Use t.Cleanup to release resources.
 type StoreFactory func(t *testing.T) cache.Store[string, int]
 
-// RunStoreContract verifies behavior required from every Store implementation.
+// RunStoreContract verifies the behaviour required from every cache.Store:
+// hits and misses, negative entries, logical expiration (including an
+// expired overwrite of a live entry), namespace isolation, idempotent key
+// invalidation, namespace invalidation, cancellation, and entries without
+// expiration. Each case runs as a subtest of t.
 func RunStoreContract(t *testing.T, factory StoreFactory) {
 	t.Helper()
 
@@ -151,10 +157,16 @@ func RunStoreContract(t *testing.T, factory StoreFactory) {
 	})
 }
 
-// BatchStoreFactory returns a fresh batch store for each contract subtest.
+// BatchStoreFactory returns the batch store under test for one contract
+// subtest, with the same sharing rules as StoreFactory.
 type BatchStoreFactory func(t *testing.T) cache.BatchStore[string, int]
 
-// RunBatchStoreContract verifies behavior required from every BatchStore implementation.
+// RunBatchStoreContract verifies the behaviour required from every
+// cache.BatchStore: results aligned with keys (including duplicates), batch
+// writes visible through Get, expired entries skipped, ErrBatchLength for
+// mismatched slices, idempotent batch invalidation, namespace invalidation,
+// empty batches, and cancellation. Each case runs as a subtest of t. Run
+// RunStoreContract as well; this suite does not repeat its cases.
 func RunBatchStoreContract(t *testing.T, factory BatchStoreFactory) {
 	t.Helper()
 

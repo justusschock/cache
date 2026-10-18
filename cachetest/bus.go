@@ -10,7 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// RunInvalidationBusContract verifies cross-instance delivery and cancellation.
+// RunInvalidationBusContract verifies the behaviour required from every
+// cache.InvalidationBus: Subscribe rejects a nil handler with
+// cache.ErrNilInvalidationHandler, an event published through one bus
+// instance reaches a subscriber on another instance unchanged, a repeated
+// publication is delivered again, and Subscribe returns context.Canceled once
+// its context is canceled. newBus is called twice, once for the subscriber
+// and once for the publisher; both instances must share a transport.
 func RunInvalidationBusContract[K comparable](
 	t *testing.T,
 	newBus func(*testing.T) cache.InvalidationBus[K],
@@ -29,7 +35,7 @@ func RunInvalidationBusContract[K comparable](
 	ctx, cancel := context.WithCancel(context.Background())
 	listenerResult := make(chan error, 1)
 	received := make(chan cache.InvalidationEvent[K], 2)
-	Go(listenerResult, func() error {
+	goReport(listenerResult, func() error {
 		return subscriber.Subscribe(ctx, event.Namespace, func(_ context.Context, delivered cache.InvalidationEvent[K]) error {
 			select {
 			case received <- delivered:

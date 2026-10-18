@@ -8,7 +8,6 @@ import (
 
 	cache "github.com/justusschock/go-cache"
 	"github.com/justusschock/go-cache/backend/memory"
-	"github.com/justusschock/go-cache/internal/cachetest"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -56,10 +55,10 @@ func TestLockerAllowsOnlyOneConcurrentHolder(t *testing.T) {
 	const workers = 32
 	results := make(chan error, workers)
 	for range workers {
-		cachetest.Go(results, func() error {
+		go func() {
 			_, err := locker.Lock(context.Background(), "users", "alice", time.Minute)
-			return err
-		})
+			results <- err
+		}()
 	}
 
 	acquired := 0
