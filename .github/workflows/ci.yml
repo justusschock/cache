@@ -2,71 +2,75 @@ name: CI
 
 on:
   push:
+    branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
-  GOPRIVATE: "github.com/justusschock/*"
-  GONOSUMDB: "github.com/justusschock/*"
+  # Verify the module exactly as released, never through a local workspace.
+  GOWORK: "off"
 
 jobs:
-  verify:
+  test:
+    name: test (Go ${{ matrix.go-version }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        go:
-          - "1.25.x"
-          - "1.26.x"
+        go-version: ["1.25.x", "oldstable", "stable"]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Require private module credentials
-        shell: bash
-        env:
-          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
-        run: |
-          if [[ -z "$GO_MODULES_TOKEN" ]]; then
-            echo "::error title=Missing GitHub Actions secret::GO_MODULES_TOKEN is required for private Go modules"
-            exit 1
-          fi
-      - name: Authenticate private module Git access
-        shell: bash
-        env:
-          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
-        run: |
-          auth_url="https://x-access-token:${GO_MODULES_TOKEN}@github.com/"
-          git config --global url."${auth_url}".insteadOf "https://github.com/"
-          git config --global --add url."${auth_url}".insteadOf "git@github.com:"
-          git config --global --add url."${auth_url}".insteadOf "ssh://git@github.com/"
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ matrix.go }}
-          cache: true
+          go-version: ${{ matrix.go-version }}
           cache-dependency-path: go.sum
-      - name: Check formatting
-        run: |
-          files="$(gofmt -l .)"
-          if [ -n "$files" ]; then
-            echo "$files"
-            exit 1
-          fi
+      - name: Verify modules
+        run: go mod verify
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race -count=1 ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable
+          cache-dependency-path: go.sum
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.15.0
       - name: Enforce test assertion policy
+        # Tests assert with testify (assert/require), never t.Fatal or t.Error.
         run: |
           if grep -REn --include='*_test.go' '\bt\.(Fatal|Fatalf|Error|Errorf|Fail|FailNow)\b' .; then
             exit 1
           fi
-      - run: go mod verify
-      - run: go vet ./...
-      - run: go test -race ./...
+      - name: Check go.mod and go.sum are tidy
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
 
   integration:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # Service images are pinned by tag; pin them by digest
+    # (image: name:tag@sha256:...) when updating them.
     services:
       redis:
         image: redis:7.4-alpine
@@ -118,89 +122,24 @@ jobs:
       HAZELCAST_ADDR: 127.0.0.1:5701
       POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/cache_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Require private module credentials
-        shell: bash
-        env:
-          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
-        run: |
-          if [[ -z "$GO_MODULES_TOKEN" ]]; then
-            echo "::error title=Missing GitHub Actions secret::GO_MODULES_TOKEN is required for private Go modules"
-            exit 1
-          fi
-      - name: Authenticate private module Git access
-        shell: bash
-        env:
-          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
-        run: |
-          auth_url="https://x-access-token:${GO_MODULES_TOKEN}@github.com/"
-          git config --global url."${auth_url}".insteadOf "https://github.com/"
-          git config --global --add url."${auth_url}".insteadOf "git@github.com:"
-          git config --global --add url."${auth_url}".insteadOf "ssh://git@github.com/"
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26.x"
-          cache: true
+          go-version: stable
+          cache-dependency-path: go.sum
       - name: Wait for services
         run: |
           for port in 6379 6380 6381 11211 5701 5432; do
             timeout 120 bash -c "until (echo > /dev/tcp/127.0.0.1/$port) >/dev/null 2>&1; do sleep 1; done"
           done
-      - name: Redis integration tests
-        working-directory: backend/redis
-        run: go test -race -tags=integration -timeout=3m ./...
-      - name: Dragonfly integration tests
-        working-directory: backend/dragonfly
-        run: go test -race -tags=integration -timeout=3m ./...
-      - name: Valkey integration tests
-        working-directory: backend/valkey
-        run: go test -race -tags=integration -timeout=3m ./...
-      - name: Memcached integration tests
-        working-directory: backend/memcached
-        run: go test -race -tags=integration -timeout=3m ./...
-      - name: Hazelcast integration tests
-        working-directory: backend/hazelcast
-        run: go test -race -tags=integration -timeout=3m ./...
-      - name: PostgreSQL integration tests
-        working-directory: backend/postgres
-        run: go test -race -tags=integration -timeout=3m ./...
-
-  release-isolation:
-    if: github.ref_type == 'tag'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - name: Require private module credentials
-        shell: bash
-        env:
-          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
+      - name: Integration tests
         run: |
-          if [[ -z "$GO_MODULES_TOKEN" ]]; then
-            echo "::error title=Missing GitHub Actions secret::GO_MODULES_TOKEN is required for private Go modules"
-            exit 1
-          fi
-      - name: Authenticate private module Git access
-        shell: bash
-        env:
-          GO_MODULES_TOKEN: ${{ secrets.GO_MODULES_TOKEN }}
-        run: |
-          auth_url="https://x-access-token:${GO_MODULES_TOKEN}@github.com/"
-          git config --global url."${auth_url}".insteadOf "https://github.com/"
-          git config --global --add url."${auth_url}".insteadOf "git@github.com:"
-          git config --global --add url."${auth_url}".insteadOf "ssh://git@github.com/"
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.26.x"
-          cache: true
-      - name: Verify released dependency graph without a workspace
-        env:
-          GOWORK: "off"
-        run: |
-          go mod download
-          go vet ./...
-          go test -race ./...
+          go test -race -count=1 -tags=integration -timeout=10m \
+            ./backend/redis/... \
+            ./backend/dragonfly/... \
+            ./backend/valkey/... \
+            ./backend/memcached/... \
+            ./backend/hazelcast/... \
+            ./backend/postgres/...

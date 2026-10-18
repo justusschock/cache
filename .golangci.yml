@@ -1,0 +1,19 @@
+version: "2"
+
+run:
+  timeout: 5m
+  # Lint the integration tests as well; CI runs them against live servers.
+  build-tags:
+    - integration
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - misspell
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
