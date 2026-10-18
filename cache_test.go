@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	cache "github.com/justusschock/go-cache"
@@ -55,6 +56,7 @@ func (s *recordingStore[K, V]) InvalidateAll(_ context.Context, _ string) error 
 	return nil
 }
 
+// FR-CACHE-01, FR-CACHE-22
 func TestNewRejectsInvalidConfiguration(t *testing.T) {
 	t.Parallel()
 
@@ -70,44 +72,53 @@ func TestNewRejectsInvalidConfiguration(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrNilStore)
 }
 
+// FR-CACHE-01
 func TestCacheSetUsesDefaultTTLAndGetReturnsValue(t *testing.T) {
-	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		store := newRecordingStore[string, int]()
+		c, err := cache.New("users", time.Minute, store)
+		require.NoError(t, err)
 
-	store := newRecordingStore[string, int]()
-	c, err := cache.New("users", time.Minute, store)
-	require.NoError(t, err)
+		require.NoError(t, c.Set(context.Background(), "alice", 42))
+		assert.True(t, store.lastSet.Found)
+		assert.Equal(t, 42, store.lastSet.Value)
+		assert.True(t, store.lastSet.ExpiresAt.Equal(time.Now().Add(time.Minute)))
 
-	before := time.Now().Add(time.Minute)
-	require.NoError(t, c.Set(context.Background(), "alice", 42))
-	after := time.Now().Add(time.Minute)
+		value, found, err := c.Get(context.Background(), "alice")
+		require.NoError(t, err)
+		assert.True(t, found)
+		assert.Equal(t, 42, value)
 
-	assert.True(t, store.lastSet.Found)
-	assert.Equal(t, 42, store.lastSet.Value)
-	assert.False(t, store.lastSet.ExpiresAt.Before(before))
-	assert.False(t, store.lastSet.ExpiresAt.After(after))
-
-	value, found, err := c.Get(context.Background(), "alice")
-	require.NoError(t, err)
-	assert.True(t, found)
-	assert.Equal(t, 42, value)
+		time.Sleep(time.Minute)
+		_, found, err = c.Get(context.Background(), "alice")
+		require.NoError(t, err)
+		assert.False(t, found, "entry must expire exactly at its TTL")
+	})
 }
 
+// FR-CACHE-01
 func TestCacheSetWithTTLOverridesDefault(t *testing.T) {
-	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		store := newRecordingStore[string, string]()
+		c, err := cache.New("users", time.Hour, store)
+		require.NoError(t, err)
 
-	store := newRecordingStore[string, string]()
-	c, err := cache.New("users", time.Hour, store)
-	require.NoError(t, err)
+		require.NoError(t, c.SetWithTTL(context.Background(), "alice", "value", 25*time.Millisecond))
+		assert.True(t, store.lastSet.ExpiresAt.Equal(time.Now().Add(25*time.Millisecond)))
+		assert.ErrorIs(t, c.SetWithTTL(context.Background(), "alice", "value", 0), cache.ErrInvalidTTL)
 
-	before := time.Now().Add(25 * time.Millisecond)
-	require.NoError(t, c.SetWithTTL(context.Background(), "alice", "value", 25*time.Millisecond))
-	after := time.Now().Add(25 * time.Millisecond)
-
-	assert.False(t, store.lastSet.ExpiresAt.Before(before))
-	assert.False(t, store.lastSet.ExpiresAt.After(after))
-	assert.ErrorIs(t, c.SetWithTTL(context.Background(), "alice", "value", 0), cache.ErrInvalidTTL)
+		time.Sleep(24 * time.Millisecond)
+		_, found, err := c.Get(context.Background(), "alice")
+		require.NoError(t, err)
+		assert.True(t, found)
+		time.Sleep(time.Millisecond)
+		_, found, err = c.Get(context.Background(), "alice")
+		require.NoError(t, err)
+		assert.False(t, found)
+	})
 }
 
+// FR-CACHE-02
 func TestCacheDistinguishesCachedZeroAndMiss(t *testing.T) {
 	t.Parallel()
 
@@ -127,6 +138,7 @@ func TestCacheDistinguishesCachedZeroAndMiss(t *testing.T) {
 	assert.Zero(t, value)
 }
 
+// FR-CACHE-02
 func TestCacheDoesNotExposeExpiredOrNegativeEntries(t *testing.T) {
 	t.Parallel()
 

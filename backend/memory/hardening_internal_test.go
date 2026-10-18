@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	cache "github.com/justusschock/go-cache"
@@ -10,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-17
 func TestCapacityBoundsNamespaceMetadata(t *testing.T) {
 	store, err := NewWithOptions[string, int](Options{MaxEntries: 1, CleanupInterval: time.Hour})
 	require.NoError(t, err)
@@ -24,6 +26,7 @@ func TestCapacityBoundsNamespaceMetadata(t *testing.T) {
 	assert.LessOrEqual(t, len(store.namespaces), 1)
 }
 
+// FR-CACHE-17
 func TestInvalidateAllDoesNotRetainEmptyNamespace(t *testing.T) {
 	store := New[string, int]()
 	t.Cleanup(func() { assert.NoError(t, store.Close()) })
@@ -32,15 +35,18 @@ func TestInvalidateAllDoesNotRetainEmptyNamespace(t *testing.T) {
 	assert.Empty(t, store.namespaces)
 }
 
+// FR-CACHE-20
 func TestExpiredLocksAreRemovedDuringChurn(t *testing.T) {
-	locker := NewLocker[string]()
-	for index := range 2_048 {
-		_, err := locker.Lock(context.Background(), time.Unix(int64(index), 0).String(), "key", time.Nanosecond)
-		require.NoError(t, err)
-		time.Sleep(time.Nanosecond)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		locker := NewLocker[string]()
+		for index := range 2_048 {
+			_, err := locker.Lock(context.Background(), time.Unix(int64(index), 0).String(), "key", time.Nanosecond)
+			require.NoError(t, err)
+			time.Sleep(time.Nanosecond)
+		}
 
-	_, err := locker.Lock(context.Background(), "live", "key", time.Hour)
-	require.NoError(t, err)
-	assert.LessOrEqual(t, len(locker.locks), 1)
+		_, err := locker.Lock(context.Background(), "live", "key", time.Hour)
+		require.NoError(t, err)
+		assert.LessOrEqual(t, len(locker.locks), 1)
+	})
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// FR-CACHE-06, FR-CACHE-17
 func TestStoreContract(t *testing.T) {
 	cachetest.RunStoreContract(t, func(t *testing.T) cache.Store[string, int] {
 		store := memory.New[string, int]()
@@ -23,6 +24,7 @@ func TestStoreContract(t *testing.T) {
 	})
 }
 
+// FR-CACHE-17
 func TestNewWithOptionsRejectsInvalidConfiguration(t *testing.T) {
 	for _, options := range []memory.Options{
 		{MaxEntries: 0, CleanupInterval: time.Minute},
@@ -35,6 +37,7 @@ func TestNewWithOptionsRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
+// FR-CACHE-17
 func TestStoreEvictsLeastRecentlyUsedEntryAtCapacity(t *testing.T) {
 	store, err := memory.NewWithOptions[string, int](memory.Options{
 		MaxEntries:      2,
@@ -58,6 +61,7 @@ func TestStoreEvictsLeastRecentlyUsedEntryAtCapacity(t *testing.T) {
 	assert.Equal(t, 2, store.Len())
 }
 
+// FR-CACHE-05, FR-CACHE-17
 func TestBatchStoreContract(t *testing.T) {
 	cachetest.RunBatchStoreContract(t, func(t *testing.T) cache.BatchStore[string, int] {
 		store := memory.New[string, int]()
@@ -66,6 +70,7 @@ func TestBatchStoreContract(t *testing.T) {
 	})
 }
 
+// FR-CACHE-17
 func TestStoreSweepsExpiredEntriesWithoutReads(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store, err := memory.NewWithOptions[string, int](memory.Options{
@@ -85,11 +90,12 @@ func TestStoreSweepsExpiredEntriesWithoutReads(t *testing.T) {
 	})
 }
 
+// FR-CACHE-03, FR-CACHE-17
 func TestStoreKeepsNoExpiryEntriesAcrossSweeps(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		store, err := memory.NewWithOptions[string, int](memory.Options{
 			MaxEntries:      10,
-			CleanupInterval: time.Minute,
+			CleanupInterval: time.Hour,
 		})
 		require.NoError(t, err)
 		t.Cleanup(func() { assert.NoError(t, store.Close()) })
@@ -110,6 +116,7 @@ func TestStoreKeepsNoExpiryEntriesAcrossSweeps(t *testing.T) {
 	})
 }
 
+// FR-CACHE-17
 func TestSetManyRespectsCapacity(t *testing.T) {
 	store, err := memory.NewWithOptions[string, int](memory.Options{
 		MaxEntries:      2,
@@ -127,6 +134,7 @@ func TestSetManyRespectsCapacity(t *testing.T) {
 	assert.Equal(t, 2, store.Len())
 }
 
+// FR-CACHE-17
 func TestStoreCloseIsIdempotent(t *testing.T) {
 	store, err := memory.NewWithOptions[string, int](memory.Options{
 		MaxEntries:      1,
@@ -137,6 +145,7 @@ func TestStoreCloseIsIdempotent(t *testing.T) {
 	assert.NoError(t, store.Close())
 }
 
+// NFR-CACHE-01
 func TestStoreIsSafeForConcurrentAccess(t *testing.T) {
 	store := memory.New[int, int]()
 	t.Cleanup(func() { assert.NoError(t, store.Close()) })

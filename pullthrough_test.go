@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	cache "github.com/justusschock/go-cache"
@@ -23,6 +24,7 @@ func newMemoryCache(t *testing.T) cache.Cache[string, string] {
 	return c
 }
 
+// FR-CACHE-09
 func TestPullThroughLoadsAndCachesMiss(t *testing.T) {
 	base := newMemoryCache(t)
 	var calls atomic.Int32
@@ -41,6 +43,7 @@ func TestPullThroughLoadsAndCachesMiss(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load())
 }
 
+// FR-CACHE-10
 func TestPullThroughCachesAuthoritativeMiss(t *testing.T) {
 	base := newMemoryCache(t)
 	var calls atomic.Int32
@@ -64,6 +67,7 @@ func TestPullThroughCachesAuthoritativeMiss(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load())
 }
 
+// FR-CACHE-10
 func TestPullThroughDoesNotCacheLoaderErrors(t *testing.T) {
 	base := newMemoryCache(t)
 	loaderErr := errors.New("database unavailable")
@@ -81,40 +85,43 @@ func TestPullThroughDoesNotCacheLoaderErrors(t *testing.T) {
 	assert.Equal(t, int32(2), calls.Load())
 }
 
+// FR-CACHE-09
 func TestPullThroughSuppressesConcurrentLoads(t *testing.T) {
-	base := newMemoryCache(t)
-	started := make(chan struct{})
-	release := make(chan struct{})
-	var calls atomic.Int32
-	pull, err := cache.NewPullThrough("users", base, func(context.Context, string) (string, bool, error) {
-		if calls.Add(1) == 1 {
-			close(started)
-		}
-		<-release
-		return "loaded", true, nil
-	})
-	require.NoError(t, err)
-
-	const workers = 32
-	results := make(chan error, workers)
-	for range workers {
-		goReport(results, func() error {
-			value, found, getErr := pull.Get(context.Background(), "alice")
-			if getErr != nil {
-				return getErr
+	synctest.Test(t, func(t *testing.T) {
+		base := newMemoryCache(t)
+		started := make(chan struct{})
+		release := make(chan struct{})
+		var calls atomic.Int32
+		pull, err := cache.NewPullThrough("users", base, func(context.Context, string) (string, bool, error) {
+			if calls.Add(1) == 1 {
+				close(started)
 			}
-			if !found || value != "loaded" {
-				return errors.New("unexpected pull-through result")
-			}
-			return nil
+			<-release
+			return "loaded", true, nil
 		})
-	}
-	<-started
-	close(release)
-	for range workers {
-		assert.NoError(t, <-results)
-	}
-	assert.Equal(t, int32(1), calls.Load())
+		require.NoError(t, err)
+
+		const workers = 32
+		results := make(chan error, workers)
+		for range workers {
+			goReport(results, func() error {
+				value, found, getErr := pull.Get(context.Background(), "alice")
+				if getErr != nil {
+					return getErr
+				}
+				if !found || value != "loaded" {
+					return errors.New("unexpected pull-through result")
+				}
+				return nil
+			})
+		}
+		<-started
+		close(release)
+		for range workers {
+			assert.NoError(t, <-results)
+		}
+		assert.Equal(t, int32(1), calls.Load())
+	})
 }
 
 type fakeLease struct {
@@ -237,79 +244,90 @@ func (l *fakeLocker) Lock(context.Context, string, string, time.Duration) (cache
 	return l.lease, nil
 }
 
+// FR-CACHE-11
 func TestPullThroughRenewsAndReleasesDistributedLease(t *testing.T) {
-	base := newMemoryCache(t)
-	lease := &fakeLease{}
-	locker := &fakeLocker{lease: lease}
-	pull, err := cache.NewPullThrough(
-		"users",
-		base,
-		func(context.Context, string) (string, bool, error) {
-			time.Sleep(35 * time.Millisecond)
-			return "loaded", true, nil
-		},
-		cache.WithLocker[string](locker, 20*time.Millisecond),
-	)
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		base := newMemoryCache(t)
+		lease := &fakeLease{}
+		locker := &fakeLocker{lease: lease}
+		pull, err := cache.NewPullThrough(
+			"users",
+			base,
+			func(context.Context, string) (string, bool, error) {
+				time.Sleep(35 * time.Millisecond)
+				return "loaded", true, nil
+			},
+			cache.WithLocker[string](locker, 20*time.Millisecond),
+		)
+		require.NoError(t, err)
 
-	value, found, err := pull.Get(context.Background(), "alice")
-	require.NoError(t, err)
-	assert.True(t, found)
-	assert.Equal(t, "loaded", value)
-	assert.GreaterOrEqual(t, lease.refreshes.Load(), int32(1))
-	assert.Equal(t, int32(1), lease.releases.Load())
+		value, found, err := pull.Get(context.Background(), "alice")
+		require.NoError(t, err)
+		assert.True(t, found)
+		assert.Equal(t, "loaded", value)
+		// The lease is refreshed every half TTL (10ms) while the 35ms load runs.
+		assert.Equal(t, int32(3), lease.refreshes.Load())
+		assert.Equal(t, int32(1), lease.releases.Load())
+	})
 }
 
+// FR-CACHE-11
 func TestPullThroughDoesNotPublishFillAfterLeaseLoss(t *testing.T) {
-	base := &recordingEntryCache{}
-	lease := &controllableLease{lost: make(chan struct{})}
-	started := make(chan struct{})
-	pull, err := cache.NewPullThrough(
-		"users",
-		base,
-		func(ctx context.Context, _ string) (string, bool, error) {
-			close(started)
-			<-lease.lost
-			<-ctx.Done()
-			return "stale", true, ctx.Err()
-		},
-		cache.WithLocker[string](&controllableLocker{lease: lease}, time.Second),
-	)
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		base := &recordingEntryCache{}
+		lease := &controllableLease{lost: make(chan struct{})}
+		started := make(chan struct{})
+		pull, err := cache.NewPullThrough(
+			"users",
+			base,
+			func(ctx context.Context, _ string) (string, bool, error) {
+				close(started)
+				<-lease.lost
+				<-ctx.Done()
+				return "stale", true, ctx.Err()
+			},
+			cache.WithLocker[string](&controllableLocker{lease: lease}, time.Second),
+		)
+		require.NoError(t, err)
 
-	result := make(chan error, 1)
-	go func() {
-		_, _, getErr := pull.Get(context.Background(), "alice")
-		result <- getErr
-	}()
-	<-started
-	close(lease.lost)
+		result := make(chan error, 1)
+		go func() {
+			_, _, getErr := pull.Get(context.Background(), "alice")
+			result <- getErr
+		}()
+		<-started
+		close(lease.lost)
 
-	require.ErrorIs(t, <-result, cache.ErrFillLeaseLost)
-	assert.Zero(t, base.setCalls.Load())
-	assert.Equal(t, int32(1), lease.releases.Load())
+		require.ErrorIs(t, <-result, cache.ErrFillLeaseLost)
+		assert.Zero(t, base.setCalls.Load())
+		assert.Equal(t, int32(1), lease.releases.Load())
+	})
 }
 
+// FR-CACHE-11
 func TestPullThroughDoesNotPublishFillAfterRenewalFailure(t *testing.T) {
-	base := &recordingEntryCache{}
-	lease := &failingRefreshLease{refreshed: make(chan struct{})}
-	pull, err := cache.NewPullThrough(
-		"users",
-		base,
-		func(ctx context.Context, _ string) (string, bool, error) {
-			<-ctx.Done()
-			return "stale", true, ctx.Err()
-		},
-		cache.WithLocker[string](&controllableLocker{lease: lease}, 2*time.Millisecond),
-	)
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		base := &recordingEntryCache{}
+		lease := &failingRefreshLease{refreshed: make(chan struct{})}
+		pull, err := cache.NewPullThrough(
+			"users",
+			base,
+			func(ctx context.Context, _ string) (string, bool, error) {
+				<-ctx.Done()
+				return "stale", true, ctx.Err()
+			},
+			cache.WithLocker[string](&controllableLocker{lease: lease}, 2*time.Millisecond),
+		)
+		require.NoError(t, err)
 
-	_, _, err = pull.Get(context.Background(), "alice")
-	require.ErrorIs(t, err, cache.ErrFillLeaseLost)
-	assert.Zero(t, base.setCalls.Load())
-	assert.Equal(t, int32(1), lease.releases.Load())
+		_, _, err = pull.Get(context.Background(), "alice")
+		require.ErrorIs(t, err, cache.ErrFillLeaseLost)
+		assert.Zero(t, base.setCalls.Load())
+		assert.Equal(t, int32(1), lease.releases.Load())
+	})
 }
 
+// FR-CACHE-10
 func TestPullThroughCustomCacheDoesNotRetainLocalNegativeEntries(t *testing.T) {
 	base := &plainCache{}
 	var loads atomic.Int32
@@ -327,6 +345,7 @@ func TestPullThroughCustomCacheDoesNotRetainLocalNegativeEntries(t *testing.T) {
 	assert.Equal(t, int32(2), loads.Load())
 }
 
+// FR-CACHE-11
 func TestPullThroughLockerFailurePolicy(t *testing.T) {
 	base := newMemoryCache(t)
 	lockErr := errors.New("lock unavailable")
@@ -358,6 +377,7 @@ func TestPullThroughLockerFailurePolicy(t *testing.T) {
 	assert.Equal(t, int32(1), calls.Load())
 }
 
+// FR-CACHE-22
 func TestNewPullThroughRejectsInvalidConfiguration(t *testing.T) {
 	base := newMemoryCache(t)
 	loader := func(context.Context, string) (string, bool, error) { return "", false, nil }
@@ -372,6 +392,7 @@ func TestNewPullThroughRejectsInvalidConfiguration(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrInvalidTTL)
 }
 
+// FR-CACHE-11
 func TestPullThroughRejectsNilSuccessfulLease(t *testing.T) {
 	base := newMemoryCache(t)
 	loader := func(context.Context, string) (string, bool, error) { return "loaded", true, nil }
@@ -419,6 +440,7 @@ func (*stagedEntryCache) SetEntry(context.Context, string, cache.Entry[string]) 
 func (*stagedEntryCache) Invalidate(context.Context, string) error                    { return nil }
 func (*stagedEntryCache) InvalidateAll(context.Context) error                         { return nil }
 
+// FR-CACHE-11
 func TestPullThroughPostAcquireHitPropagatesReleaseError(t *testing.T) {
 	base := &stagedEntryCache{}
 	releaseErr := errors.New("release failed")
@@ -440,6 +462,7 @@ func TestPullThroughPostAcquireHitPropagatesReleaseError(t *testing.T) {
 	assert.Equal(t, int32(1), lease.releases.Load())
 }
 
+// FR-CACHE-11
 func TestPullThroughPostAcquireStrictLookupErrorStillReleases(t *testing.T) {
 	lookupErr := errors.New("lookup failed")
 	base := &stagedEntryCache{thirdErr: lookupErr}
@@ -458,4 +481,98 @@ func TestPullThroughPostAcquireStrictLookupErrorStillReleases(t *testing.T) {
 	_, _, err = pull.Get(context.Background(), "alice")
 	assert.ErrorIs(t, err, lookupErr)
 	assert.Equal(t, int32(1), lease.releases.Load())
+}
+
+type contendedLocker struct {
+	calls atomic.Int32
+}
+
+func (l *contendedLocker) Lock(context.Context, string, string, time.Duration) (cache.Lease, error) {
+	l.calls.Add(1)
+	return nil, cache.ErrLockNotAcquired
+}
+
+// FR-CACHE-11
+func TestPullThroughPollsContendedLockUntilAnotherFillLands(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		base := newMemoryCache(t)
+		locker := &contendedLocker{}
+		var loads atomic.Int32
+		pull, err := cache.NewPullThrough(
+			"users",
+			base,
+			func(context.Context, string) (string, bool, error) {
+				loads.Add(1)
+				return "local", true, nil
+			},
+			cache.WithLocker[string](locker, time.Minute),
+			cache.WithLockPollInterval[string](10*time.Millisecond),
+		)
+		require.NoError(t, err)
+
+		go func() {
+			// Another process holding the lease completes its fill.
+			time.Sleep(35 * time.Millisecond)
+			assert.NoError(t, base.Set(context.Background(), "alice", "remote"))
+		}()
+
+		start := time.Now()
+		value, found, err := pull.Get(context.Background(), "alice")
+		require.NoError(t, err)
+		assert.True(t, found)
+		assert.Equal(t, "remote", value)
+		assert.Zero(t, loads.Load())
+		assert.Equal(t, int32(5), locker.calls.Load())
+		assert.Equal(t, 40*time.Millisecond, time.Since(start))
+	})
+}
+
+// FR-CACHE-11
+func TestPullThroughContendedLockHonoursContextCancellation(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		base := newMemoryCache(t)
+		pull, err := cache.NewPullThrough(
+			"users",
+			base,
+			func(context.Context, string) (string, bool, error) { return "local", true, nil },
+			cache.WithLocker[string](&contendedLocker{}, time.Minute),
+		)
+		require.NoError(t, err)
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_, _, err = pull.Get(ctx, "alice")
+		assert.ErrorIs(t, err, context.DeadlineExceeded)
+	})
+}
+
+// FR-CACHE-10
+func TestPullThroughNegativeEntriesExpireAfterNegativeTTL(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		base := newMemoryCache(t)
+		var loads atomic.Int32
+		pull, err := cache.NewPullThrough(
+			"users",
+			base,
+			func(context.Context, string) (string, bool, error) {
+				loads.Add(1)
+				return "", false, nil
+			},
+			cache.WithNegativeTTL[string](10*time.Second),
+		)
+		require.NoError(t, err)
+
+		for range 2 {
+			_, found, getErr := pull.Get(context.Background(), "missing")
+			require.NoError(t, getErr)
+			assert.False(t, found)
+		}
+		assert.Equal(t, int32(1), loads.Load())
+
+		time.Sleep(10 * time.Second)
+		_, found, err := pull.Get(context.Background(), "missing")
+		require.NoError(t, err)
+		assert.False(t, found)
+		assert.Equal(t, int32(2), loads.Load())
+	})
 }

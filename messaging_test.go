@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	cache "github.com/justusschock/go-cache"
@@ -83,6 +84,7 @@ func subscriptionFor(namespace string) messaging.Subscription {
 	}
 }
 
+// FR-CACHE-22
 func TestNewMessagingInvalidationBusRejectsNilDependencies(t *testing.T) {
 	publisher := &messagingPublisher[string]{}
 	subscriber := &messagingSubscriber[string]{}
@@ -95,6 +97,7 @@ func TestNewMessagingInvalidationBusRejectsNilDependencies(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrNilSubscriptionFactory)
 }
 
+// FR-CACHE-16
 func TestMessagingBusRejectsNilHandler(t *testing.T) {
 	bus, err := cache.NewMessagingInvalidationBus(
 		&messagingPublisher[string]{},
@@ -107,6 +110,7 @@ func TestMessagingBusRejectsNilHandler(t *testing.T) {
 	assert.ErrorIs(t, err, cache.ErrNilInvalidationHandler)
 }
 
+// FR-CACHE-16
 func TestMessagingBusPublishesTypedEnvelope(t *testing.T) {
 	publisher := &messagingPublisher[string]{}
 	bus, err := cache.NewMessagingInvalidationBus(
@@ -125,6 +129,7 @@ func TestMessagingBusPublishesTypedEnvelope(t *testing.T) {
 	assert.Equal(t, event, publisher.envelopes[0].Payload)
 }
 
+// FR-CACHE-16
 func TestMessagingBusPublishesToFactorySubject(t *testing.T) {
 	publisher := &messagingPublisher[string]{}
 	factory := func(namespace string) messaging.Subscription {
@@ -142,6 +147,7 @@ func TestMessagingBusPublishesToFactorySubject(t *testing.T) {
 	assert.Equal(t, factory("users").Subject, publisher.envelopes[0].Subject)
 }
 
+// FR-CACHE-16
 func TestMessagingBusAcknowledgesHandledEvent(t *testing.T) {
 	delivery := invalidationDelivery(t, cache.InvalidationEvent[string]{
 		Namespace: "users", Kind: cache.InvalidateKey, Key: "alice",
@@ -164,6 +170,7 @@ func TestMessagingBusAcknowledgesHandledEvent(t *testing.T) {
 	assert.Equal(t, subscriptionFor("users"), subscriber.subscription)
 }
 
+// FR-CACHE-16
 func TestMessagingBusNacksHandlerError(t *testing.T) {
 	delivery := invalidationDelivery(t, cache.InvalidationEvent[string]{
 		Namespace: "users", Kind: cache.InvalidateKey, Key: "alice",
@@ -187,6 +194,7 @@ func TestMessagingBusNacksHandlerError(t *testing.T) {
 	assert.ErrorIs(t, delivery.nackErr, wantErr)
 }
 
+// FR-CACHE-16
 func TestMessagingBusAcknowledgesMismatchedNamespaceWithoutHandling(t *testing.T) {
 	delivery := invalidationDelivery(t, cache.InvalidationEvent[string]{
 		Namespace: "orders", Kind: cache.InvalidateNamespace,
@@ -212,42 +220,45 @@ func TestMessagingBusAcknowledgesMismatchedNamespaceWithoutHandling(t *testing.T
 	assert.Zero(t, delivery.nacks)
 }
 
+// FR-CACHE-16
 func TestMessagingBusRoundTripsThroughMemoryBroker(t *testing.T) {
-	broker := messagingmemory.NewBroker[cache.InvalidationEvent[string]](time.Millisecond)
-	t.Cleanup(func() { assert.NoError(t, broker.Close()) })
-	bus, err := cache.NewMessagingInvalidationBus[string](broker, broker, subscriptionFor)
-	require.NoError(t, err)
+	synctest.Test(t, func(t *testing.T) {
+		broker := messagingmemory.NewBroker[cache.InvalidationEvent[string]](time.Millisecond)
+		t.Cleanup(func() { assert.NoError(t, broker.Close()) })
+		bus, err := cache.NewMessagingInvalidationBus[string](broker, broker, subscriptionFor)
+		require.NoError(t, err)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	received := make(chan cache.InvalidationEvent[string], 1)
-	result := make(chan error, 1)
-	go func() {
-		result <- bus.Subscribe(ctx, "users", func(_ context.Context, event cache.InvalidationEvent[string]) error {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		received := make(chan cache.InvalidationEvent[string], 1)
+		result := make(chan error, 1)
+		go func() {
+			result <- bus.Subscribe(ctx, "users", func(_ context.Context, event cache.InvalidationEvent[string]) error {
+				select {
+				case received <- event:
+				default:
+				}
+				return nil
+			})
+		}()
+
+		event := cache.InvalidationEvent[string]{Namespace: "users", Kind: cache.InvalidateKey, Key: "alice"}
+		ticker := time.NewTicker(10 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			require.NoError(t, bus.Publish(ctx, event))
 			select {
-			case received <- event:
-			default:
+			case got := <-received:
+				assert.Equal(t, event, got)
+				cancel()
+				assert.ErrorIs(t, <-result, context.Canceled)
+				return
+			case <-ticker.C:
+			case <-ctx.Done():
+				require.NoError(t, context.Cause(ctx))
 			}
-			return nil
-		})
-	}()
-
-	event := cache.InvalidationEvent[string]{Namespace: "users", Kind: cache.InvalidateKey, Key: "alice"}
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		require.NoError(t, bus.Publish(ctx, event))
-		select {
-		case got := <-received:
-			assert.Equal(t, event, got)
-			cancel()
-			assert.ErrorIs(t, <-result, context.Canceled)
-			return
-		case <-ticker.C:
-		case <-ctx.Done():
-			require.NoError(t, context.Cause(ctx))
 		}
-	}
+	})
 }
 
 var _ cache.InvalidationBus[string] = (*cache.MessagingInvalidationBus[string])(nil)
